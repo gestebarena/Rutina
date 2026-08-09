@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Item" ADD COLUMN "stock" INTEGER;
+ALTER TABLE "Item" ADD COLUMN "stockAlertAt" INTEGER;

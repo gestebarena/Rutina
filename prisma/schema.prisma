@@ -1,0 +1,153 @@
+// Esquema de la base de datos de Rutina.
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// Personas que usan la app: Nico (niño) y los padres (admin).
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  username     String   @unique
+  passwordHash String
+  role         String   @default("CHILD") // ADMIN o CHILD
+  timezone     String? // zona horaria en la que este usuario quiere ver las horas (null = la de Nico)
+  createdAt    DateTime @default(now())
+  intakes      Intake[]
+}
+
+// Cada medicina o alérgeno del plan.
+model Item {
+  id        String   @id @default(cuid())
+  name      String
+  dose      String // p.ej. "7 mg", "20 mg", "18 cacahuetes"
+  category  String // MED, MAINTENANCE, THREE_WEEK, WEEKLY, TREATMENT
+  frequency String // etiqueta legible: "cada 24 h", "3 x semana"...
+  // Horas previstas (hora de Madrid) como JSON, p.ej. ["07:30","19:30"].
+  // Vacío [] para items sin hora fija.
+  times     String   @default("[]")
+  rule      String? // nota de regla: ayuno, separar 15 min, capped...
+  // Para tomas que no son diarias (p.ej. cada 48 h = días alternos):
+  // intervalDays = cada cuántos días toca; anchorDay = una fecha en la que SÍ tocaba.
+  intervalDays Int? // null = diario
+  anchorDay    String? // "AAAA-MM-DD"
+  // Escalera de dosis para treatment foods (sube sola al cumplir N tomas):
+  doseLevels   String @default("[]") // JSON: ["1 mg","2.5 mg",...] (vacío = dosis fija)
+  levelTarget  Int    @default(7) // (obsoleto con cycleStartDay) nº de tomas para subir de nivel
+  currentLevel Int    @default(0) // (obsoleto con cycleStartDay) nivel manual
+  dosesAtLevel Int    @default(0) // (obsoleto con cycleStartDay)
+  cycleStartDay String? // "AAAA-MM-DD" (lunes de la semana 1): la escalera sube sola cada 7 días
+  doseDays     String @default("[]") // JSON: días concretos "AAAA-MM-DD" en que toca (vacío = usar la frecuencia normal)
+  // --- Reingeniería (modelo de occurrences): recurrencia unificada ---
+  recurrence    String  @default("DAILY") // DAILY | EVERY_N_DAYS | WEEKDAYS | SPECIFIC_DATES | WEEKLY | BIWEEKLY
+  weekdays      String? // WEEKDAYS: JSON [1,3,5] (0=domingo..6=sábado)
+  specificDates String? // SPECIFIC_DATES: JSON ["2026-08-07", ...]
+  capped    Boolean  @default(false)
+  active    Boolean  @default(true)
+  sortOrder Int      @default(0)
+  stock        Int? // tomas restantes (null = no se controla el stock)
+  stockAlertAt Int? // avisar cuando queden estas o menos
+  intakes   Intake[]
+  slots       ItemSlot[]
+  occurrences DoseOccurrence[]
+}
+
+// Los MOMENTOS de un item, con IDENTIDAD ESTABLE (no la hora, que es mutable).
+model ItemSlot {
+  id        String  @id @default(cuid())
+  itemId    String
+  item      Item    @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  label     String  // "mañana" | "mediodía" | "tarde" | "noche" | "único"
+  time      String? // "07:30" hora de Madrid; null = sin hora fija (alimentos/semanales)
+  sortOrder Int     @default(0)
+  active    Boolean @default(true)
+  occurrences DoseOccurrence[]
+
+  @@unique([itemId, label])
+}
+
+// La TOMA CONCRETA a cumplir (materializada y congelada). Unidad de verdad del pasado.
+model DoseOccurrence {
+  id     String   @id @default(cuid())
+  itemId String
+  item   Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  slotId String
+  slot   ItemSlot @relation(fields: [slotId], references: [id], onDelete: Cascade)
+
+  periodKey   String  // diario: "2026-08-08"; semanal: "2026-W32"; quincenal: "2026-BW16"
+  dueDate     String  // fecha esperada "AAAA-MM-DD" (ancla Madrid)
+  plannedTime String? // hora Madrid CONGELADA (copia de slot.time al generar)
+  plannedDose String  @default("") // dosis CONGELADA (escalera ya resuelta para dueDate)
+
+  status        String    @default("PENDING") // PENDING | TAKEN | SKIPPED | POSTPONED | MISSED
+  takenTime     String? // "AAAA-MM-DD HH:MM" hora real (ancla Madrid)
+  takenById     String?
+  postponeUntil String?
+  recordedAt    DateTime?
+  note          String?
+  overridden    Boolean   @default(false) // hora/dosis editada a mano (fase 2): NO se recalcula al regenerar
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([itemId, slotId, periodKey])
+  @@index([dueDate])
+}
+
+// Bitácora append-only (trazabilidad médica: nunca se borra).
+model AuditLog {
+  id       String   @id @default(cuid())
+  at       DateTime @default(now())
+  actorId  String? // usuario que hizo la acción
+  action   String // MARK_TAKEN | SKIP | POSTPONE | UNMARK | EDIT_ITEM | EDIT_SLOT_TIME | GENERATE | MIGRATE
+  entity   String // occurrence | item | slot
+  entityId String
+  detail   String? // JSON con antes/después
+}
+
+// Ajustes generales de la app (una sola fila, id = 1).
+model Config {
+  id            Int     @id @default(1)
+  currentWeek   Int     @default(1) // semana actual del ciclo TIP
+  trackingStart String? // desde qué día "AAAA-MM-DD" se cuentan las atrasadas
+  planTimezone  String  @default("Europe/Madrid") // ANCLA del plan: las horas "07:30" son de esta zona (fija; solo la cambia el modo viaje)
+  nicoTimezone  String  @default("Europe/Madrid") // dónde está Nico ahora (cambia al viajar; solo afecta cómo se ven las horas)
+}
+
+// Suscripción de un móvil para recibir avisos (Web Push).
+model PushSub {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+}
+
+// Para no repetir el mismo aviso (una fila por toma avisada).
+model Notified {
+  id        String   @id @default(cuid())
+  key       String   @unique // "día|itemId|slot"
+  createdAt DateTime @default(now())
+}
+
+// Registro de cada toma marcada como hecha.
+model Intake {
+  id      String   @id @default(cuid())
+  item    Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  itemId  String
+  user    User     @relation(fields: [userId], references: [id])
+  userId  String
+  day       String // fecha "AAAA-MM-DD" (hora de Madrid)
+  slot      String // qué toma del día: la hora "07:30" o "u" para item sin hora
+  status    String   @default("TAKEN") // TAKEN (tomada) o SKIPPED (saltada)
+  takenTime String? // hora real confirmada "HH:MM" (hora de Madrid)
+  recordedAt DateTime @default(now()) @map("takenAt") // instante (UTC) en que se guardó el registro
+  note      String?
+
+  @@unique([itemId, day, slot])
+}
