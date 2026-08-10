@@ -6,16 +6,15 @@ import HeaderClock from "./HeaderClock";
 import { doseLevelForDay } from "@/lib/schedule";
 import { MEDALS } from "@/lib/stats";
 import { ensureGenerated } from "@/lib/generate";
-import { periodBounds, isPeriodItem } from "@/lib/recurrence";
+import { isMaintenance, maintInterval } from "@/lib/recurrence";
 import { convertWallTime, tzCode, tzLabel, wallTimeToMs } from "@/lib/tz";
 import { parseTaken } from "@/lib/taken";
 import { logout } from "./actions";
 import TodayList, { type Slot } from "./TodayList";
 import EnableNotifications from "./EnableNotifications";
 
-// Categorías cuyas tomas son OBLIGATORIAS del día (los semanales/quincenales van aparte).
-const MUST_CATS = new Set(["MED", "MAINTENANCE", "THREE_WEEK", "TREATMENT"]);
-const MAINT_DAILY = new Set(["MAINTENANCE", "THREE_WEEK"]);
+// Obligaciones DIARIAS con hora (medicinas y treatment foods). Los maintenance foods van rodante, aparte.
+const MUST_CATS = new Set(["MED", "TREATMENT"]);
 
 function minDay(a: string, b: string) { return a < b ? a : b; }
 function addMinutes(t: string, mins: number): string {
@@ -136,11 +135,13 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
   }
 
   // Convierte una occurrence en un Slot para la UI.
-  function occToSlot(o: Occ, opts: { must: boolean; foodNote?: string | null; forToday: boolean }): Slot {
+  function occToSlot(o: Occ, opts: { must: boolean; foodNote?: string | null; forToday: boolean; maintAgenda?: boolean }): Slot {
     const it = itemById.get(o.itemId)!;
-    const isMaint = MAINT_DAILY.has(it.category);
-    const planned = o.plannedTime ?? (isMaint || isPeriodItem(it) ? "09:00" : null);
-    const time = planned ? convertWallTime(planned, o.dueDate, anchorTz, viewerTz) : null;
+    const isMaint = isMaintenance(it);
+    // Maintenance en la agenda de hoy: se muestra a la mañana (09:00) pero se marca "ahora" (día = hoy).
+    const agendaDay = opts.maintAgenda ? today : o.dueDate;
+    const planned = o.plannedTime ?? (isMaint ? "09:00" : null);
+    const time = planned ? convertWallTime(planned, agendaDay, anchorTz, viewerTz) : null;
     const altTime = planned && viewerTz !== anchorTz ? planned : null;
     const taken = o.status === "TAKEN", skipped = o.status === "SKIPPED", postponed = o.status === "POSTPONED";
     const takenDisp = dispTime(o.takenTime, o.dueDate);
@@ -166,9 +167,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
     const stockLow = it.stock !== null && it.stockAlertAt !== null && it.stock <= it.stockAlertAt;
 
     return {
-      occId: o.id, itemId: o.itemId, slot: o.slotId, day: o.dueDate,
+      occId: o.id, itemId: o.itemId, slot: o.slotId, day: agendaDay,
       name: it.name, dose: o.plannedDose || it.dose,
-      time, planTime: opts.must || !isPeriodItem(it) ? planned : null, altTime,
+      time, planTime: opts.maintAgenda ? null : planned, altTime,
       frequency: it.frequency, rule: opts.forToday ? it.rule : null, capped: it.capped, category: it.category,
       taken, skipped, postponed,
       postponeUntil: postponed ? dispTime(o.postponeUntil, o.dueDate) : null,
@@ -188,7 +189,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
 
   let mustTotal = 0, mustPending = 0;
 
-  // --- HOY: diarias obligatorias (medicinas, maintenance, treatment) ---
+  // --- HOY: obligaciones diarias (medicinas + treatment foods) ---
   const todayDaily = occActive.filter((o) => o.dueDate === today && MUST_CATS.has(itemById.get(o.itemId)!.category));
   const todaySlots: Slot[] = [];
   for (const o of todayDaily) {
@@ -197,33 +198,37 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
     todaySlots.push(occToSlot(o, { must: true, forToday: true }));
   }
 
-  // --- HOY: semanales/quincenales (una toma por período, con ventana) ---
-  let optionalCount = 0;
-  for (const it of items) {
-    if (!isPeriodItem(it)) continue;
-    const interval = it.recurrence === "BIWEEKLY" ? 14 : 7;
-    const b = periodBounds(it, today);
-    const cur = occActive.find((o) => o.itemId === it.id && o.dueDate === b.end);
-    if (!cur) continue;
-    if (cur.status === "TAKEN" || cur.status === "SKIPPED") continue; // ya hecha esta semana/quincena
-    // ¿hace cuánto de la última toma?
-    let lastDay: string | null = null;
-    for (const o of occActive) if (o.itemId === it.id && o.status === "TAKEN") { const d = o.takenTime ? o.takenTime.slice(0, 10) : o.dueDate; if (!lastDay || d > lastDay) lastDay = d; }
-    const daysSince = lastDay ? dayDiff(lastDay, today) : null;
-    let state: "hidden" | "optional" | "must" = "optional";
-    let foodNote = "recomendado: sábados";
-    if (daysSince !== null) {
-      if (daysSince < interval) state = "hidden";
-      else if (daysSince < interval * 1.5) { state = "optional"; foodNote = `hace ${daysSince} días · ideal cada ${interval}`; }
-      else { state = "must"; foodNote = `hace ${daysSince} días · atrasado (ideal cada ${interval})`; }
+  // --- Maintenance foods (RODANTE): cada uno tiene UNA próxima toma abierta ---
+  const maintItems = items.filter((it) => isMaintenance(it));
+  const maintIds = maintItems.map((i) => i.id);
+  const maintTaken = await prisma.doseOccurrence.findMany({ where: { itemId: { in: maintIds }, status: "TAKEN" }, select: { itemId: true, dueDate: true, takenTime: true } });
+  const lastByItem = new Map<string, string>();
+  for (const o of maintTaken) { const d = /^\d{4}-\d{2}-\d{2}/.test(o.takenTime || "") ? o.takenTime!.slice(0, 10) : o.dueDate; const c = lastByItem.get(o.itemId); if (!c || d > c) lastByItem.set(o.itemId, d); }
+
+  type MaintRow = { itemId: string; occId: string | null; name: string; dose: string; frequency: string; interval: number; lastTaken: string | null; daysAgo: number | null; nextDue: string; overdue: boolean };
+  const maintDetail: MaintRow[] = [];
+  let maintDueCount = 0;
+  for (const it of maintItems) {
+    const open = occActive.find((o) => o.itemId === it.id && (o.status === "PENDING" || o.status === "POSTPONED"));
+    const last = lastByItem.get(it.id) ?? null;
+    const iv = maintInterval(it);
+    const nextDue = open?.dueDate ?? (last ? addDays(last, iv) : today);
+    const daysAgo = last ? dayDiff(last, today) : null;
+    const overdue = nextDue < today;
+    maintDetail.push({ itemId: it.id, occId: open?.id ?? null, name: it.name, dose: it.dose, frequency: it.frequency, interval: iv, lastTaken: last, daysAgo, nextDue, overdue });
+    // Agenda de hoy: solo si toca hoy o está atrasado y no está pospuesto a una fecha futura.
+    if (open) {
+      const snoozeDay = open.status === "POSTPONED" && open.postponeUntil && /^\d{4}-\d{2}-\d{2}/.test(open.postponeUntil) ? open.postponeUntil.slice(0, 10) : null;
+      const snoozedFuture = snoozeDay ? snoozeDay > today : false;
+      if (nextDue <= today && !snoozedFuture) {
+        maintDueCount++;
+        const note = overdue ? `última hace ${daysAgo ?? "?"} días · atrasado (cada ${iv} días)` : (last ? `última hace ${daysAgo} días` : "aún sin registrar");
+        todaySlots.push(occToSlot(open, { must: false, foodNote: note, forToday: true, maintAgenda: true }));
+      }
     }
-    if (state === "hidden") continue;
-    if (state === "must") { mustTotal++; mustPending++; }
-    else optionalCount++;
-    todaySlots.push(occToSlot(cur, { must: state === "must", foodNote, forToday: true }));
   }
 
-  // --- Días pasados (obligatorias diarias) y mañana ---
+  // --- Días pasados (medicinas + treatment) y mañana ---
   function buildDay(day: string): Slot[] {
     const list = occActive.filter((o) => o.dueDate === day && MUST_CATS.has(itemById.get(o.itemId)!.category));
     const slots = list.map((o) => occToSlot(o, { must: true, forToday: false }));
@@ -238,8 +243,6 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
     missedCount += slots.filter((s) => !s.taken && !s.skipped && !s.postponed).length;
     pastDays.push({ day: d, slots });
   }
-  // Overdue de hoy (semanales must) también cuentan como atrasadas.
-  missedCount += todaySlots.filter((s) => s.must && isPeriodItem(itemById.get(s.itemId)!) && !s.taken && !s.skipped && !s.postponed).length;
   const tomorrowBlock = { day: tomorrow, slots: buildDay(tomorrow) };
 
   // Treatment foods de hoy ya tomados (para el aviso de 15 min; hora en ancla MAD).
@@ -293,10 +296,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-3 gap-2">
-          <Stat label="Obligatorias" value={`${mustTotal - mustPending}/${mustTotal}`} tone="white" />
-          <Stat label="Atrasadas" value={`${missedCount}`} tone={missedCount > 0 ? "red" : "white"} href={missedCount > 0 ? "#atrasadas" : undefined} />
-          <Stat label="Opcionales" value={`${optionalCount}`} tone="white" />
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <Stat label="Atrasadas · ver ›" value={`${missedCount}`} tone={missedCount > 0 ? "red" : "white"} href="#pendientes" />
+          <Stat label="Maintenance foods · ver ›" value={maintDueCount > 0 ? `${maintDueCount} para hoy` : "al día"} tone="white" href="#maintenance" />
         </div>
         {allDone && <p className="mt-2 font-medium">🎉 ¡Todo lo obligatorio de hoy está hecho!</p>}
 
@@ -324,6 +326,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
         )}
         <TodayList
           todaySlots={todaySlots}
+          maintDetail={maintDetail}
           pastDays={pastDays}
           tomorrow={tomorrowBlock}
           backDays={backDays}

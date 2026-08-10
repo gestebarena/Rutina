@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { markIntake, markMany, skipIntake, unmarkIntake, postponeIntake, markMissing } from "./actions";
+import { markIntake, markMany, skipIntake, unmarkIntake, postponeIntake, markMissing, markMaintenanceNow } from "./actions";
 import { shortDayLabel, addDays } from "@/lib/madrid";
+
+export type MaintRow = { itemId: string; occId: string | null; name: string; dose: string; frequency: string; interval: number; lastTaken: string | null; daysAgo: number | null; nextDue: string; overdue: boolean };
+function ddmm(d: string | null): string { return d ? d.slice(8, 10) + "/" + d.slice(5, 7) : "—"; }
 
 // Desfase (min) de una zona en un instante.
 function tzOffsetMin(tz: string, date: Date): number {
@@ -65,13 +68,15 @@ export type Mark = { slot: string; status: string; time: string | null };
 export type DayHist = { day: string; marks: Mark[] };
 
 const SKIP_REASONS = ["Fiebre", "Vómito", "Enfermo", "Viaje", "Vista a FAI", "Otro motivo"];
+const MAINT_CATS = new Set(["THREE_WEEK", "WEEKLY", "BIWEEKLY", "MAINTENANCE"]);
+function isMaintCat(cat: string) { return MAINT_CATS.has(cat); }
 
 function toMin(t: string) {
   const [h, m] = t.split(":").map(Number);
   return h * 60 + m;
 }
 
-type MarkTarget = { title: string; day: string; slots: { itemId: string; slot: string; occId: string }[]; isTreatment: boolean };
+type MarkTarget = { title: string; day: string; slots: { itemId: string; slot: string; occId: string }[]; isTreatment: boolean; isMaint: boolean };
 type Bucket = { time: string | null; planTime: string | null; altTime: string | null; slots: Slot[] };
 
 function bucketByTime(slots: Slot[]): Bucket[] {
@@ -95,6 +100,7 @@ function fmtElapsed(min: number): string {
 
 export default function TodayList({
   todaySlots,
+  maintDetail,
   pastDays,
   tomorrow,
   backDays,
@@ -112,6 +118,7 @@ export default function TodayList({
   anchorTzLabel,
 }: {
   todaySlots: Slot[];
+  maintDetail: MaintRow[];
   pastDays: DayBlock[];
   tomorrow: DayBlock;
   backDays: number;
@@ -139,6 +146,8 @@ export default function TodayList({
   const [histItem, setHistItem] = useState<{ itemId: string; name: string; hist: DayHist[] } | null>(null);
   const [detail, setDetail] = useState<Slot | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);
+  const [postDate, setPostDate] = useState(() => addDays(planToday, 2)); // calendario de posponer
+  const [adjustPlan, setAdjustPlan] = useState(true); // maintenance: ¿ajustar el plan al mover/marcar?
 
   function openHistory(s: Slot) {
     setHistItem({ itemId: s.itemId, name: s.name, hist: historyByItem[s.itemId] ?? [] });
@@ -154,7 +163,7 @@ export default function TodayList({
     setDetail(null);
     setWhen(s.editWhen || defaultWhen(s.day, s.planTime ?? null));
     setShowPostpone(false);
-    setDialog({ title: s.name, day: s.day, slots: [{ itemId: s.itemId, slot: s.slot, occId: s.occId }], isTreatment: s.category === "TREATMENT" });
+    setDialog({ title: s.name, day: s.day, slots: [{ itemId: s.itemId, slot: s.slot, occId: s.occId }], isTreatment: s.category === "TREATMENT", isMaint: isMaintCat(s.category) });
   }
   const nextRef = useRef<HTMLDivElement>(null);
   const todayRef = useRef<HTMLDivElement>(null);
@@ -188,13 +197,15 @@ export default function TodayList({
     }
     return msToLocal(Date.now(), viewerTz);
   }
-  function openDialog(title: string, day: string, slots: { itemId: string; slot: string; occId: string }[], isTreatment: boolean, planSlotTime: string | null) {
+  function openDialog(title: string, day: string, slots: { itemId: string; slot: string; occId: string }[], isTreatment: boolean, planSlotTime: string | null, isMaint = false) {
     setWhen(defaultWhen(day, planSlotTime));
     setShowPostpone(false);
-    setDialog({ title, day, slots, isTreatment });
+    setAdjustPlan(true);
+    setPostDate(addDays(planToday, 2));
+    setDialog({ title, day, slots, isTreatment, isMaint });
   }
   function openSingle(s: Slot) {
-    openDialog(s.name, s.day, [{ itemId: s.itemId, slot: s.slot, occId: s.occId }], s.category === "TREATMENT", s.planTime ?? null);
+    openDialog(s.name, s.day, [{ itemId: s.itemId, slot: s.slot, occId: s.occId }], s.category === "TREATMENT", s.planTime ?? null, isMaintCat(s.category));
   }
   function openPack(b: Bucket, day: string) {
     const pend = b.slots.filter((s) => !s.taken && !s.skipped && !s.postponed);
@@ -209,7 +220,7 @@ export default function TodayList({
     const d = dialog;
     const anchorWhen = toAnchor(when);
     startTransition(async () => {
-      if (d.slots.length === 1) await markIntake(d.slots[0].occId, anchorWhen);
+      if (d.slots.length === 1) await markIntake(d.slots[0].occId, anchorWhen, d.isMaint ? adjustPlan : true);
       else await markMany(d.slots.map((s) => s.occId), anchorWhen);
       setSelected(new Set());
       setDialog(null);
@@ -220,9 +231,17 @@ export default function TodayList({
     const s = dialog.slots[0];
     const untilAnchor = msToLocal(Date.now() + mins * 60000, anchorTz).replace("T", " ");
     startTransition(async () => {
-      await postponeIntake(s.occId, untilAnchor);
+      await postponeIntake(s.occId, untilAnchor, false);
       setDialog(null);
     });
+  }
+  // Posponer a otro DÍA (calendario / presets de días). Para maintenance, con opción de ajustar el plan.
+  function doPostponeToDate(dateStr: string) {
+    if (!dialog || dialog.slots.length !== 1) return;
+    const s = dialog.slots[0];
+    const until = `${dateStr} 09:00`;
+    const adj = dialog.isMaint ? adjustPlan : false;
+    startTransition(async () => { await postponeIntake(s.occId, until, adj); setDialog(null); });
   }
   function doSkip(reason: string) {
     if (!skipTarget) return;
@@ -249,6 +268,16 @@ export default function TodayList({
   }
 
   const anyMissed = pastDays.some((d) => d.slots.some((s) => !s.taken && !s.skipped && !s.postponed));
+
+  // Pendientes de resolver: días pasados sin marcar + de hoy lo que ya venció (medicinas/treatment)
+  // + maintenance que toca hoy o está atrasado. Se muestran pegados arriba y nunca se pierden.
+  const unresolved = (s: Slot) => !s.taken && !s.skipped && !s.postponed;
+  const pendingList: { s: Slot; label: string }[] = [
+    ...pastDays.flatMap((d) => d.slots.filter(unresolved).map((s) => ({ s, label: dayHeading(d.day) }))),
+    ...todaySlots.filter((s) => unresolved(s) && (isMaintCat(s.category) || (!!s.planTime && toMin(s.planTime) <= now))).map((s) => ({ s, label: isMaintCat(s.category) ? "food" : "hoy" })),
+  ];
+
+  const sortedMaint = [...maintDetail].sort((a, b) => (Number(b.overdue) - Number(a.overdue)) || a.nextDue.localeCompare(b.nextDue));
 
   // Render de la agenda cronológica (todo hoy en un solo listado por hora).
   function renderAgenda() {
@@ -290,6 +319,23 @@ export default function TodayList({
 
   return (
     <>
+      {/* Pendientes de resolver: pegados arriba, nunca se pierden del scroll. */}
+      {pendingList.length > 0 && (
+        <div id="pendientes" className="sticky top-2 z-20 rounded-2xl border-2 border-red-200 bg-red-50/95 backdrop-blur p-3 shadow-md">
+          <p className="text-sm font-bold text-red-700 mb-1.5">⚠️ Pendiente de resolver ({pendingList.length})</p>
+          <div className="space-y-0.5 max-h-52 overflow-y-auto">
+            {pendingList.map(({ s, label }) => (
+              <button key={s.occId} onClick={() => openSingle(s)} disabled={pending} className="w-full flex items-center gap-2 text-left text-sm py-1 disabled:opacity-60">
+                <span className="w-5 shrink-0 text-center">{catIcon(s.category)}</span>
+                <span className="flex-1 min-w-0 truncate text-slate-800">{s.name}</span>
+                <span className="shrink-0 text-xs text-slate-500">{label === "hoy" ? (s.time ?? "hoy") : label === "food" ? "🥣" : label}</span>
+                <span className="shrink-0 text-slate-300">›</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {viewerTzLabel && anchorTzLabel && (
         <div className="rounded-2xl bg-sky-50 border border-sky-200 p-3 text-sm text-sky-800">
           <p>🌍 Las horas se muestran en <strong>{viewerTzLabel}</strong> ({viewerCode}).</p>
@@ -326,6 +372,27 @@ export default function TodayList({
         <CompactDay day={tomorrow.day} slots={tomorrow.slots} heading={dayHeading(tomorrow.day)} state="future" pending={pending} start={startTransition} onMark={openSingle} onDetail={openDetail} />
       )}
 
+      {/* Detalle de maintenance foods: última / próxima, para incorporar oportunistamente */}
+      {maintDetail.length > 0 && (
+        <section id="maintenance" className="scroll-mt-24">
+          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide px-1 mb-1">🥣 Maintenance foods</h2>
+          <p className="text-xs text-slate-400 px-1 mb-2">Última toma y próxima recomendada. Si en una comida conviene incorporar uno, tocá &quot;Ahora&quot; y se recalcula la próxima según su frecuencia.</p>
+          <div className="rounded-2xl border border-slate-200 bg-white divide-y divide-slate-100">
+            {sortedMaint.map((m) => (
+              <div key={m.itemId} className="p-3 flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-slate-800 truncate">{m.name} <span className="text-xs font-normal text-slate-400">{m.dose}</span></p>
+                  <p className="text-xs text-slate-500">{m.frequency} · última {ddmm(m.lastTaken)}{m.daysAgo != null ? ` (hace ${m.daysAgo} d)` : ""}</p>
+                  <p className={`text-xs ${m.overdue ? "text-red-600 font-medium" : "text-slate-500"}`}>próxima: {ddmm(m.nextDue)}{m.overdue ? " · atrasado" : ""}</p>
+                </div>
+                <button onClick={() => startTransition(async () => { await markMaintenanceNow(m.itemId); })} disabled={pending}
+                  className="shrink-0 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">🍽 Ahora</button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       <StatusBanner slots={todaySlots} anyMissed={anyMissed} now={now} />
 
       {dialog && (
@@ -340,6 +407,12 @@ export default function TodayList({
               <span className="mt-1 block text-center text-sm font-medium text-sky-700">Anotando: {dayLabel} · hora local de Nico ({viewerCode})</span>
             </label>
             {warning && <p className="mt-3 text-sm text-amber-700 bg-amber-50 rounded-xl p-3">⚠️ {warning}</p>}
+            {dialog.isMaint && (
+              <label className="mt-3 flex items-start gap-2 text-xs text-slate-600 bg-violet-50 rounded-xl p-2.5">
+                <input type="checkbox" checked={adjustPlan} onChange={(e) => setAdjustPlan(e.target.checked)} className="mt-0.5 h-4 w-4" />
+                <span>Recalcular la próxima <b>desde esta toma</b> (cada {dialog.slots.length === 1 ? "" : ""}su frecuencia). Destildá para mantener la fecha ya planeada.</span>
+              </label>
+            )}
             <div className="mt-5 flex gap-3">
               <button onClick={() => setDialog(null)} className="flex-1 rounded-xl border border-slate-300 py-3 font-medium text-slate-600">Cancelar</button>
               <button onClick={confirmMark} disabled={pending} className="flex-1 rounded-xl bg-emerald-600 py-3 font-semibold text-white disabled:opacity-60">
@@ -351,13 +424,24 @@ export default function TodayList({
                 <button onClick={() => { const d = dialog; setDialog(null); setSkipTarget({ occId: d.slots[0].occId, day: d.day, name: d.title }); }}
                   className="mt-3 w-full rounded-xl border border-slate-200 py-2 text-sm text-slate-500">No se tomó (saltar)</button>
                 {showPostpone ? (
-                  <div className="mt-2">
-                    <p className="text-center text-xs text-slate-400 mb-1">Recordar más tarde:</p>
-                    <div className="grid grid-cols-3 gap-2">
-                      <button onClick={() => doPostpone(30)} disabled={pending} className="rounded-xl border border-slate-200 py-2 text-sm font-medium text-slate-700 disabled:opacity-60">+30 min</button>
-                      <button onClick={() => doPostpone(60)} disabled={pending} className="rounded-xl border border-slate-200 py-2 text-sm font-medium text-slate-700 disabled:opacity-60">+1 h</button>
+                  <div className="mt-2 space-y-2">
+                    <p className="text-center text-xs text-slate-400">Posponer a:</p>
+                    <div className="grid grid-cols-4 gap-2">
                       <button onClick={() => doPostpone(120)} disabled={pending} className="rounded-xl border border-slate-200 py-2 text-sm font-medium text-slate-700 disabled:opacity-60">+2 h</button>
+                      <button onClick={() => doPostponeToDate(addDays(planToday, 1))} disabled={pending} className="rounded-xl border border-slate-200 py-2 text-sm font-medium text-slate-700 disabled:opacity-60">Mañana</button>
+                      <button onClick={() => doPostponeToDate(addDays(planToday, 2))} disabled={pending} className="rounded-xl border border-slate-200 py-2 text-sm font-medium text-slate-700 disabled:opacity-60">+2 días</button>
+                      <button onClick={() => doPostponeToDate(addDays(planToday, 7))} disabled={pending} className="rounded-xl border border-slate-200 py-2 text-sm font-medium text-slate-700 disabled:opacity-60">+1 sem</button>
                     </div>
+                    <div className="flex gap-2">
+                      <input type="date" value={postDate} min={planToday} onChange={(e) => setPostDate(e.target.value)} className="flex-1 rounded-xl border border-slate-300 px-3 py-2 text-sm" />
+                      <button onClick={() => doPostponeToDate(postDate)} disabled={pending} className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">📅 A esa fecha</button>
+                    </div>
+                    {dialog.isMaint && (
+                      <label className="flex items-start gap-2 text-xs text-slate-600 bg-violet-50 rounded-xl p-2.5">
+                        <input type="checkbox" checked={adjustPlan} onChange={(e) => setAdjustPlan(e.target.checked)} className="mt-0.5 h-4 w-4" />
+                        <span>Ajustar el plan desde esa fecha (la frecuencia rueda desde ahí). Destildá para mover <b>solo esta toma</b>.</span>
+                      </label>
+                    )}
                   </div>
                 ) : (
                   <button onClick={() => setShowPostpone(true)} className="mt-2 w-full rounded-xl border border-amber-200 bg-amber-50 py-2 text-sm font-medium text-amber-700">⏰ Posponer</button>

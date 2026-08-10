@@ -6,8 +6,20 @@ import { prisma } from "@/lib/db";
 import { createSession, destroySession, getSession, hashPassword, verifyPassword } from "@/lib/auth";
 import { normalizeWhen } from "@/lib/taken";
 import { madridDay, addDays } from "@/lib/madrid";
-import { deriveRecurrence, slotLabels } from "@/lib/recurrence";
-import { regenerateFuture, ensureGenerated } from "@/lib/generate";
+import { deriveRecurrence, slotLabels, isMaintenance, maintInterval } from "@/lib/recurrence";
+import { regenerateFuture, ensureGenerated, createMaintenanceNext } from "@/lib/generate";
+
+function dayOf(takenTime: string | null, fallback: string): string {
+  return takenTime && /^\d{4}-\d{2}-\d{2}/.test(takenTime) ? takenTime.slice(0, 10) : fallback;
+}
+
+// Tras resolver (tomar/saltar) un maintenance food, crea su PRÓXIMA toma rodante.
+// baseDate = desde qué fecha contar la frecuencia (según "ajustar plan" o "solo esta toma").
+async function rollNextMaintenance(occ: { itemId: string; dueDate: string }, baseDate: string) {
+  const item = await prisma.item.findUnique({ where: { id: occ.itemId } });
+  if (!item || !isMaintenance(item)) return;
+  await createMaintenanceNext(prisma, item, addDays(baseDate, maintInterval(item)));
+}
 
 // Guarda la suscripción de avisos de este móvil para el usuario actual.
 export async function savePushSub(sub: { endpoint: string; p256dh: string; auth: string }): Promise<void> {
@@ -192,7 +204,8 @@ export async function logout(): Promise<void> {
 // --- Marcado (sobre DoseOccurrence, identidad estable) ---
 
 // Marca una toma como hecha, guardando la fecha+hora real ("AAAA-MM-DD HH:MM", ancla Madrid).
-export async function markIntake(occId: string, when: string): Promise<void> {
+// adjustPlan (solo maintenance): true = la próxima rueda desde ESTA toma; false = mantiene la cadencia planeada.
+export async function markIntake(occId: string, when: string, adjustPlan = true): Promise<void> {
   const session = await getSession();
   if (!session) redirect("/login");
   const takenTime = normalizeWhen(when);
@@ -203,7 +216,10 @@ export async function markIntake(occId: string, when: string): Promise<void> {
     data: { status: "TAKEN", takenTime, postponeUntil: null, takenById: session.userId, recordedAt: new Date() },
   });
   if (occ.status !== "TAKEN") await adjustStock(occ.itemId, -1);
-  await audit(session.userId, "MARK_TAKEN", "occurrence", occId, { takenTime });
+  await audit(session.userId, "MARK_TAKEN", "occurrence", occId, { takenTime, adjustPlan });
+  // Maintenance: agenda la próxima rodante.
+  const base = adjustPlan ? dayOf(takenTime, occ.dueDate) : occ.dueDate;
+  await rollNextMaintenance(occ, base);
   revalidatePath("/");
 }
 
@@ -221,6 +237,7 @@ export async function markMany(occIds: string[], when: string): Promise<void> {
     });
     if (occ.status !== "TAKEN") await adjustStock(occ.itemId, -1);
     await audit(session.userId, "MARK_TAKEN", "occurrence", occId, { takenTime });
+    await rollNextMaintenance(occ, dayOf(takenTime, occ.dueDate));
   }
   revalidatePath("/");
 }
@@ -238,22 +255,32 @@ export async function skipIntake(occId: string, reason?: string): Promise<void> 
   });
   if (occ.status === "TAKEN") await adjustStock(occ.itemId, +1);
   await audit(session.userId, "SKIP", "occurrence", occId, { note });
+  // Maintenance: la próxima rueda desde la fecha planeada (no se dio, pero se mantiene la cadencia).
+  await rollNextMaintenance(occ, occ.dueDate);
   revalidatePath("/");
 }
 
-// Pospone una toma hasta la hora indicada (no molesta con avisos hasta entonces).
-export async function postponeIntake(occId: string, until: string): Promise<void> {
+// Pospone una toma. `until` = "AAAA-MM-DD HH:MM" (o fecha suelta para postergar a otro día).
+// adjustPlan (maintenance): true = mueve el ancla del plan a esa fecha; false = solo aplaza este recordatorio.
+export async function postponeIntake(occId: string, until: string, adjustPlan = false): Promise<void> {
   const session = await getSession();
   if (!session) redirect("/login");
   const untilTime = normalizeWhen(until);
   const occ = await prisma.doseOccurrence.findUnique({ where: { id: occId } });
   if (!occ) return;
+  const newDay = dayOf(untilTime, occ.dueDate);
   await prisma.doseOccurrence.update({
     where: { id: occId },
-    data: { status: "POSTPONED", postponeUntil: untilTime, takenTime: null, takenById: session.userId, recordedAt: new Date() },
+    data: {
+      status: "POSTPONED", postponeUntil: untilTime, takenTime: null,
+      // Al ajustar el plan movemos también la fecha de la toma (el ancla rodante); si no, solo el recordatorio.
+      dueDate: adjustPlan ? newDay : occ.dueDate,
+      overridden: adjustPlan ? true : occ.overridden,
+      takenById: session.userId, recordedAt: new Date(),
+    },
   });
   if (occ.status === "TAKEN") await adjustStock(occ.itemId, +1);
-  await audit(session.userId, "POSTPONE", "occurrence", occId, { untilTime });
+  await audit(session.userId, "POSTPONE", "occurrence", occId, { untilTime, adjustPlan });
   revalidatePath("/");
 }
 
@@ -263,14 +290,31 @@ export async function unmarkIntake(occId: string): Promise<void> {
   if (!session) redirect("/login");
   const occ = await prisma.doseOccurrence.findUnique({ where: { id: occId } });
   if (!occ) return;
-  const status = occ.dueDate < madridDay() ? "MISSED" : "PENDING";
+  const item = await prisma.item.findUnique({ where: { id: occ.itemId } });
+  const maint = item && isMaintenance(item);
+  // Maintenance: al desmarcar, quitar la "próxima" que se había generado (mantener 1 abierta).
+  const reopenStatus = maint ? "PENDING" : (occ.dueDate < madridDay() ? "MISSED" : "PENDING");
   await prisma.doseOccurrence.update({
     where: { id: occId },
-    data: { status, takenTime: null, postponeUntil: null, note: null, takenById: null, recordedAt: null },
+    data: { status: reopenStatus, takenTime: null, postponeUntil: null, note: null, takenById: null, recordedAt: null },
   });
+  if (maint) {
+    await prisma.doseOccurrence.deleteMany({ where: { itemId: occ.itemId, id: { not: occId }, status: { in: ["PENDING", "POSTPONED"] }, dueDate: { gte: occ.dueDate } } });
+  }
   if (occ.status === "TAKEN") await adjustStock(occ.itemId, +1);
   await audit(session.userId, "UNMARK", "occurrence", occId, null);
   revalidatePath("/");
+}
+
+// Marca oportunista desde el detalle de maintenance foods: "lo está comiendo ahora".
+// Marca la toma abierta como hecha ahora y recalcula la próxima rodante desde hoy.
+export async function markMaintenanceNow(itemId: string): Promise<void> {
+  const session = await getSession();
+  if (!session) redirect("/login");
+  const occ = await prisma.doseOccurrence.findFirst({ where: { itemId, status: { in: ["PENDING", "POSTPONED"] } }, orderBy: { dueDate: "asc" } });
+  if (!occ) return;
+  const now = `${madridDay()} ${new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Madrid", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date())}`;
+  await markIntake(occ.id, now, true); // adjustPlan=true: la próxima rueda desde hoy
 }
 
 // Marca como tomadas (a la hora del plan) todas las tomas atrasadas de un item en los últimos 7 días.

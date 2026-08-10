@@ -30,6 +30,19 @@ export function isPeriodItem(item: { recurrence: string }): boolean {
   return item.recurrence === "WEEKLY" || item.recurrence === "BIWEEKLY";
 }
 
+// Maintenance foods: se agendan RODANTE ("cada N días desde la última toma"), no en grilla fija.
+export const MAINT_CATS = new Set(["THREE_WEEK", "WEEKLY", "BIWEEKLY", "MAINTENANCE"]);
+export function isMaintenance(item: { category: string }): boolean {
+  return MAINT_CATS.has(item.category);
+}
+// Cadencia rodante en días (editable por admin vía intervalDays; si no, según la frecuencia).
+export function maintInterval(item: { category: string; intervalDays?: number | null }): number {
+  if (item.intervalDays && item.intervalDays > 0) return item.intervalDays;
+  if (item.category === "BIWEEKLY") return 14;
+  if (item.category === "WEEKLY") return 7;
+  return 2; // 3x/semana y MAINTENANCE: ~cada 2 días
+}
+
 // Deriva la recurrencia nueva a partir de los campos viejos (usado en el backfill).
 export function deriveRecurrence(old: {
   category: string; intervalDays: number | null; doseDays: string | null;
