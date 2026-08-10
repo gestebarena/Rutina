@@ -278,11 +278,14 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
 
   return (
     <main className="min-h-dvh bg-sky-50 pb-16">
-      <header className="sticky top-0 z-30 bg-sky-600 text-white px-5 pt-4 pb-3 rounded-b-3xl shadow-md">
+      <header className="bg-sky-600 text-white px-5 pt-4 pb-3 rounded-b-3xl shadow-md">
         <div className="flex items-start justify-between">
           <div>
             <p className="text-sky-100 text-sm">Hola, {session.name} 👋</p>
             <HeaderClock nicoTz={nicoTz} />
+            {viewerTz !== anchorTz && (
+              <p className="text-[11px] text-sky-200 mt-0.5">🌍 horas en {tzLabel(viewerTz)} · el plan sigue en {tzLabel(anchorTz)}</p>
+            )}
           </div>
           <div className="flex flex-col items-end gap-1">
             <a href="/historial" className="text-sky-100 text-sm underline underline-offset-2">Historial</a>

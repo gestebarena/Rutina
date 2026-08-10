@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { markIntake, markMany, skipIntake, unmarkIntake, postponeIntake, markMissing, markMaintenanceNow } from "./actions";
+import { markIntake, markMany, skipIntake, unmarkIntake, postponeIntake, markMissing } from "./actions";
 import { shortDayLabel, addDays } from "@/lib/madrid";
 
 export type MaintRow = { itemId: string; occId: string | null; name: string; dose: string; frequency: string; interval: number; lastTaken: string | null; daysAgo: number | null; nextDue: string; overdue: boolean };
@@ -207,6 +207,11 @@ export default function TodayList({
   function openSingle(s: Slot) {
     openDialog(s.name, s.day, [{ itemId: s.itemId, slot: s.slot, occId: s.occId }], s.category === "TREATMENT", s.planTime ?? null, isMaintCat(s.category));
   }
+  // Desde la sección de maintenance foods: abre el MISMO modal (no marca de una).
+  function openMaintDialog(m: MaintRow) {
+    if (!m.occId) return;
+    openDialog(m.name, planToday, [{ itemId: m.itemId, slot: m.itemId, occId: m.occId }], false, null, true);
+  }
   function openPack(b: Bucket, day: string) {
     const pend = b.slots.filter((s) => !s.taken && !s.skipped && !s.postponed);
     openDialog(b.time ? `Toma de las ${b.time} (${pend.length})` : `${pend.length} tomas`, day, pend.map((s) => ({ itemId: s.itemId, slot: s.slot, occId: s.occId })), false, b.planTime);
@@ -319,9 +324,9 @@ export default function TodayList({
 
   return (
     <>
-      {/* Pendientes de resolver: pegados arriba, nunca se pierden del scroll. */}
+      {/* Pendientes de resolver: FIJOS arriba (sticky top-0), nunca se pierden del scroll. */}
       {pendingList.length > 0 && (
-        <div id="pendientes" className="sticky top-2 z-20 rounded-2xl border-2 border-red-200 bg-red-50/95 backdrop-blur p-3 shadow-md">
+        <div id="pendientes" className="sticky top-0 z-30 -mx-4 px-4 pt-2 pb-2 border-b-2 border-red-200 bg-red-50/95 backdrop-blur shadow-md">
           <p className="text-sm font-bold text-red-700 mb-1.5">⚠️ Pendiente de resolver ({pendingList.length})</p>
           <div className="space-y-0.5 max-h-52 overflow-y-auto">
             {pendingList.map(({ s, label }) => (
@@ -333,13 +338,6 @@ export default function TodayList({
               </button>
             ))}
           </div>
-        </div>
-      )}
-
-      {viewerTzLabel && anchorTzLabel && (
-        <div className="rounded-2xl bg-sky-50 border border-sky-200 p-3 text-sm text-sky-800">
-          <p>🌍 Las horas se muestran en <strong>{viewerTzLabel}</strong> ({viewerCode}).</p>
-          <p className="text-xs text-sky-600 mt-0.5">Al lado, &quot;plan XX:XX {anchorCode}&quot; = la hora del plan en {anchorTzLabel}, que no cambia.</p>
         </div>
       )}
 
@@ -385,15 +383,15 @@ export default function TodayList({
                   <p className="text-xs text-slate-500">{m.frequency} · última {ddmm(m.lastTaken)}{m.daysAgo != null ? ` (hace ${m.daysAgo} d)` : ""}</p>
                   <p className={`text-xs ${m.overdue ? "text-red-600 font-medium" : "text-slate-500"}`}>próxima: {ddmm(m.nextDue)}{m.overdue ? " · atrasado" : ""}</p>
                 </div>
-                <button onClick={() => startTransition(async () => { await markMaintenanceNow(m.itemId); })} disabled={pending}
-                  className="shrink-0 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">🍽 Ahora</button>
+                <button onClick={() => openMaintDialog(m)} disabled={pending}
+                  className="shrink-0 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">🍽 Marcar</button>
               </div>
             ))}
           </div>
         </section>
       )}
 
-      <StatusBanner slots={todaySlots} anyMissed={anyMissed} now={now} />
+      <StatusBanner slots={todaySlots} anyMissed={anyMissed} now={now} pendingCount={pendingList.length} />
 
       {dialog && (
         <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4" onClick={() => setDialog(null)}>
@@ -707,8 +705,9 @@ function DoseIndicator({ dueInMin, ago }: { dueInMin?: number | null; ago?: numb
   return <span className="block text-xs text-slate-500 mt-0.5">{dot} {text}{agoTxt}</span>;
 }
 
-function StatusBanner({ slots, anyMissed, now }: { slots: Slot[]; anyMissed: boolean; now: number }) {
-  let late = anyMissed;
+function StatusBanner({ slots, anyMissed, now, pendingCount }: { slots: Slot[]; anyMissed: boolean; now: number; pendingCount: number }) {
+  // Si hay algo pendiente de resolver (incluye maintenance atrasado), nunca es verde.
+  let late = anyMissed || pendingCount > 0;
   let soon = false;
   for (const s of slots) {
     if (s.taken || s.skipped || s.postponed || !s.planTime) continue;
@@ -720,7 +719,7 @@ function StatusBanner({ slots, anyMissed, now }: { slots: Slot[]; anyMissed: boo
   const cfg = {
     green: { bg: "bg-emerald-600", text: "✅ Todo al día", href: null as string | null },
     yellow: { bg: "bg-amber-500", text: "⏰ Hay una toma para ahora · ver ›", href: "#ahora" },
-    red: { bg: "bg-red-600", text: "⚠️ Hay tomas pendientes · ver ›", href: anyMissed ? "#atrasadas" : "#ahora" },
+    red: { bg: "bg-red-600", text: `⚠️ ${pendingCount > 0 ? pendingCount : "Hay"} pendiente${pendingCount === 1 ? "" : "s"} de resolver · ver ›`, href: "#pendientes" },
   }[state];
   const cls = `fixed bottom-0 left-0 right-0 z-40 ${cfg.bg} text-white text-center py-3 font-semibold shadow-lg`;
   return cfg.href
