@@ -6,7 +6,7 @@ import HeaderClock from "./HeaderClock";
 import { doseLevelForDay } from "@/lib/schedule";
 import { MEDALS } from "@/lib/stats";
 import { ensureGenerated } from "@/lib/generate";
-import { isMaintenance, maintInterval } from "@/lib/recurrence";
+import { isMaintenance, maintInterval, nextMaintDue } from "@/lib/recurrence";
 import { convertWallTime, tzCode, tzLabel, wallTimeToMs } from "@/lib/tz";
 import { parseTaken } from "@/lib/taken";
 import { logout } from "./actions";
@@ -212,7 +212,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
     const open = occActive.find((o) => o.itemId === it.id && (o.status === "PENDING" || o.status === "POSTPONED"));
     const last = lastByItem.get(it.id) ?? null;
     const iv = maintInterval(it);
-    const nextDue = open?.dueDate ?? (last ? addDays(last, iv) : today);
+    const cadence = it.category === "THREE_WEEK" ? "objetivo L/X/V" : `cada ${iv} días`;
+    const nextDue = open?.dueDate ?? (last ? nextMaintDue(it, last) : today);
     const daysAgo = last ? dayDiff(last, today) : null;
     const overdue = nextDue < today;
     maintDetail.push({ itemId: it.id, occId: open?.id ?? null, name: it.name, dose: it.dose, frequency: it.frequency, interval: iv, lastTaken: last, daysAgo, nextDue, overdue });
@@ -222,7 +223,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
       const snoozedFuture = snoozeDay ? snoozeDay > today : false;
       if (nextDue <= today && !snoozedFuture) {
         maintDueCount++;
-        const note = overdue ? `última hace ${daysAgo ?? "?"} días · atrasado (cada ${iv} días)` : (last ? `última hace ${daysAgo} días` : "aún sin registrar");
+        const note = overdue ? `última hace ${daysAgo ?? "?"} días · atrasado (${cadence})` : (last ? `última hace ${daysAgo} días` : "aún sin registrar");
         todaySlots.push(occToSlot(open, { must: false, foodNote: note, forToday: true, maintAgenda: true }));
       }
     }

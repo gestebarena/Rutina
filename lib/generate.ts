@@ -1,7 +1,7 @@
 // Generación idempotente de occurrences. Nunca sobrescribe una fila existente
 // (el pasado y lo ya marcado quedan congelados). Sirve para el backfill y para el runtime.
 import { addDays } from "./madrid";
-import { ItemLike, isDueOn, isPeriodItem, isMaintenance, maintInterval, resolveDose, periodKeyFor, periodDueDate } from "./recurrence";
+import { ItemLike, isDueOn, isPeriodItem, isMaintenance, nextMaintDue, resolveDose, periodKeyFor, periodDueDate } from "./recurrence";
 
 type SlotRow = { id: string; label: string; time: string | null; active: boolean };
 type ItemWithSlots = ItemLike & { active: boolean; category: string; slots: SlotRow[] };
@@ -85,8 +85,7 @@ export async function ensureMaintenanceRolling(prisma: any, today: string) {
     const open = await prisma.doseOccurrence.count({ where: { itemId: it.id, status: { in: ["PENDING", "POSTPONED"] } } });
     if (open > 0) continue; // ya hay una próxima abierta
     const last = await lastResolvedDate(prisma, it.id);
-    const iv = maintInterval(it);
-    const nextDue = last ? addDays(last, iv) : today; // nunca dada aún → toca ya
+    const nextDue = last ? nextMaintDue(it, last) : today; // nunca dada aún → toca ya
     await createMaintenanceNext(prisma, it, nextDue);
   }
 }

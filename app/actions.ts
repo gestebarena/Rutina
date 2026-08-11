@@ -6,7 +6,7 @@ import { prisma } from "@/lib/db";
 import { createSession, destroySession, getSession, hashPassword, verifyPassword } from "@/lib/auth";
 import { normalizeWhen } from "@/lib/taken";
 import { madridDay, addDays } from "@/lib/madrid";
-import { deriveRecurrence, slotLabels, isMaintenance, maintInterval } from "@/lib/recurrence";
+import { deriveRecurrence, slotLabels, isMaintenance, nextMaintDue } from "@/lib/recurrence";
 import { regenerateFuture, ensureGenerated, createMaintenanceNext } from "@/lib/generate";
 
 function dayOf(takenTime: string | null, fallback: string): string {
@@ -18,7 +18,7 @@ function dayOf(takenTime: string | null, fallback: string): string {
 async function rollNextMaintenance(occ: { itemId: string; dueDate: string }, baseDate: string) {
   const item = await prisma.item.findUnique({ where: { id: occ.itemId } });
   if (!item || !isMaintenance(item)) return;
-  await createMaintenanceNext(prisma, item, addDays(baseDate, maintInterval(item)));
+  await createMaintenanceNext(prisma, item, nextMaintDue(item, baseDate));
 }
 
 // Guarda la suscripción de avisos de este móvil para el usuario actual.
