@@ -5,7 +5,6 @@ import { doseLevelForDay } from "./schedule";
 
 // Epoch (un lunes) para numerar las quincenas de forma estable.
 const BIWEEK_EPOCH = "2026-01-05"; // lunes
-const MWF = [1, 3, 5]; // lunes, miércoles, viernes (weekdayOfDay: 0=domingo)
 
 export type ItemLike = {
   id: string;
@@ -45,13 +44,12 @@ export function maintInterval(item: { category: string; intervalDays?: number | 
 }
 
 // Próxima fecha de un maintenance food a partir de `fromDate` (la última toma).
-// 3x/semana → apunta a Lun/Mié/Vie con mínimo 2 días de separación: da el patrón 2/2/3 y
-// se re-acomoda solo a la grilla L/X/V si se atrasó. El resto → cada N días fijos.
+// 3x/semana → objetivo Lun/Mié/Vie: SIEMPRE +2 días, salvo el fin de semana (viernes → lunes = +3).
+// Así, en ritmo da L/X/V (2/2/3); y si se atrasa, todos los saltos de 2 mantienen ALTA la exposición
+// y re-sincronizan solos a L/X/V (nunca se agrega un 3 para "corregir"). El resto → cada N días fijos.
 export function nextMaintDue(item: { category: string; intervalDays?: number | null }, fromDate: string): string {
   if (item.category === "THREE_WEEK" && !(item.intervalDays && item.intervalDays > 0)) {
-    let d = addDays(fromDate, 2); // mínimo 2 días entre tomas
-    for (let i = 0; i < 9; i++) { if (MWF.includes(weekdayOfDay(d))) return d; d = addDays(d, 1); }
-    return d;
+    return addDays(fromDate, weekdayOfDay(fromDate) === 5 ? 3 : 2); // viernes(5) → lunes; resto → +2
   }
   return addDays(fromDate, maintInterval(item));
 }
