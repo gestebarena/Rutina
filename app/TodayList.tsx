@@ -56,6 +56,7 @@ export type Slot = {
   dueInMin?: number | null; // minutos hasta la hora prevista (negativo = ya pasó)
   prev?: { day: string; status: string; time: string | null } | null;
   hasHistory?: boolean;
+  overdue?: boolean; // maintenance: su próxima ya pasó de día (atrasado)
   recordedBy?: string | null;
   recordedAtLabel?: string | null;
   editWhen?: string | null; // "AAAA-MM-DDTHH:MM" en zona del que mira (para editar)
@@ -279,7 +280,7 @@ export default function TodayList({
   const unresolved = (s: Slot) => !s.taken && !s.skipped && !s.postponed;
   const pendingList: { s: Slot; label: string }[] = [
     ...pastDays.flatMap((d) => d.slots.filter(unresolved).map((s) => ({ s, label: dayHeading(d.day) }))),
-    ...todaySlots.filter((s) => unresolved(s) && (isMaintCat(s.category) || (!!s.planTime && toMin(s.planTime) <= now))).map((s) => ({ s, label: isMaintCat(s.category) ? "food" : "hoy" })),
+    ...todaySlots.filter((s) => unresolved(s) && (isMaintCat(s.category) ? !!s.overdue : (!!s.planTime && toMin(s.planTime) <= now))).map((s) => ({ s, label: isMaintCat(s.category) ? "food" : "hoy" })),
   ];
 
   const sortedMaint = [...maintDetail].sort((a, b) => (Number(b.overdue) - Number(a.overdue)) || a.nextDue.localeCompare(b.nextDue));

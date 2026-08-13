@@ -224,7 +224,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
       if (nextDue <= today && !snoozedFuture) {
         maintDueCount++;
         const note = overdue ? `última hace ${daysAgo ?? "?"} días · atrasado (${cadence})` : (last ? `última hace ${daysAgo} días` : "aún sin registrar");
-        todaySlots.push(occToSlot(open, { must: false, foodNote: note, forToday: true, maintAgenda: true }));
+        // "must"/overdue solo si YA se pasó de día; lo que toca hoy va en la agenda sin alarma.
+        todaySlots.push({ ...occToSlot(open, { must: overdue, foodNote: note, forToday: true, maintAgenda: true }), overdue });
       }
     }
   }
