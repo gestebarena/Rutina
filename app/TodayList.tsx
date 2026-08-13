@@ -273,15 +273,21 @@ export default function TodayList({
     }
   }
 
-  const anyMissed = pastDays.some((d) => d.slots.some((s) => !s.taken && !s.skipped && !s.postponed));
-
-  // Pendientes de resolver: días pasados sin marcar + de hoy lo que ya venció (medicinas/treatment)
-  // + maintenance que toca hoy o está atrasado. Se muestran pegados arriba y nunca se pierden.
   const unresolved = (s: Slot) => !s.taken && !s.skipped && !s.postponed;
+  const MAINT_MOMENT = 9 * 60; // hora sugerida de los maintenance (09:00 ancla, "después del desayuno")
+  // ¿Ya pasó el momento sugerido de esta toma de HOY? (medicinas: su hora; maintenance: 09:00 o atrasado)
+  const momentPassed = (s: Slot) => {
+    if (isMaintCat(s.category)) return !!s.overdue || now >= MAINT_MOMENT;
+    return !!s.planTime && now >= toMin(s.planTime);
+  };
+  // Pendientes de resolver: TODO lo que ya pasó su momento y sigue sin marcar (días pasados + hoy).
   const pendingList: { s: Slot; label: string }[] = [
     ...pastDays.flatMap((d) => d.slots.filter(unresolved).map((s) => ({ s, label: dayHeading(d.day) }))),
-    ...todaySlots.filter((s) => unresolved(s) && (isMaintCat(s.category) ? !!s.overdue : (!!s.planTime && toMin(s.planTime) <= now))).map((s) => ({ s, label: isMaintCat(s.category) ? "food" : "hoy" })),
+    ...todaySlots.filter((s) => unresolved(s) && momentPassed(s)).map((s) => ({ s, label: isMaintCat(s.category) ? "food" : (s.time ?? "hoy") })),
   ];
+  // Banner: rojo si lo pendiente incluye algo con HORA FIJA (medicina/treatment); si solo hay maintenance, amarillo.
+  const pendingFixed = pendingList.some((p) => !isMaintCat(p.s.category));
+  const pendingFlex = pendingList.some((p) => isMaintCat(p.s.category));
 
   const sortedMaint = [...maintDetail].sort((a, b) => (Number(b.overdue) - Number(a.overdue)) || a.nextDue.localeCompare(b.nextDue));
 
@@ -392,7 +398,7 @@ export default function TodayList({
         </section>
       )}
 
-      <StatusBanner slots={todaySlots} anyMissed={anyMissed} now={now} pendingCount={pendingList.length} />
+      <StatusBanner pendingCount={pendingList.length} pendingFixed={pendingFixed} pendingFlex={pendingFlex} />
 
       {dialog && (
         <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4" onClick={() => setDialog(null)}>
@@ -706,21 +712,13 @@ function DoseIndicator({ dueInMin, ago }: { dueInMin?: number | null; ago?: numb
   return <span className="block text-xs text-slate-500 mt-0.5">{dot} {text}{agoTxt}</span>;
 }
 
-function StatusBanner({ slots, anyMissed, now, pendingCount }: { slots: Slot[]; anyMissed: boolean; now: number; pendingCount: number }) {
-  // Si hay algo pendiente de resolver (incluye maintenance atrasado), nunca es verde.
-  let late = anyMissed || pendingCount > 0;
-  let soon = false;
-  for (const s of slots) {
-    if (s.taken || s.skipped || s.postponed || !s.planTime) continue;
-    const diff = now - toMin(s.planTime);
-    if (diff > 10) late = true;
-    else if (Math.abs(diff) <= 10) soon = true;
-  }
-  const state = late ? "red" : soon ? "yellow" : "green";
+function StatusBanner({ pendingCount, pendingFixed, pendingFlex }: { pendingCount: number; pendingFixed: boolean; pendingFlex: boolean }) {
+  // Rojo si hay algo con hora fija atrasado; amarillo si solo hay maintenance para dar; verde si no hay nada.
+  const state = pendingFixed ? "red" : pendingFlex ? "yellow" : "green";
   const cfg = {
     green: { bg: "bg-emerald-600", text: "✅ Todo al día", href: null as string | null },
-    yellow: { bg: "bg-amber-500", text: "⏰ Hay una toma para ahora · ver ›", href: "#ahora" },
-    red: { bg: "bg-red-600", text: `⚠️ ${pendingCount > 0 ? pendingCount : "Hay"} pendiente${pendingCount === 1 ? "" : "s"} de resolver · ver ›`, href: "#pendientes" },
+    yellow: { bg: "bg-amber-500", text: `🥣 ${pendingCount} maintenance para dar · ver ›`, href: "#pendientes" },
+    red: { bg: "bg-red-600", text: `⚠️ ${pendingCount} pendiente${pendingCount === 1 ? "" : "s"} de resolver · ver ›`, href: "#pendientes" },
   }[state];
   const cls = `fixed bottom-0 left-0 right-0 z-40 ${cfg.bg} text-white text-center py-3 font-semibold shadow-lg`;
   return cfg.href
