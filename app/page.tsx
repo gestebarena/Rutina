@@ -212,7 +212,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
     const open = occActive.find((o) => o.itemId === it.id && (o.status === "PENDING" || o.status === "POSTPONED"));
     const last = lastByItem.get(it.id) ?? null;
     const iv = maintInterval(it);
-    const cadence = it.category === "THREE_WEEK" ? "objetivo L/X/V" : `cada ${iv} días`;
+    const hasDates = !!it.specificDates && it.specificDates !== "[]";
+    const cadence = hasDates ? "según fechas del plan" : it.category === "THREE_WEEK" ? "objetivo L/X/V" : `cada ${iv} días`;
     const nextDue = open?.dueDate ?? (last ? nextMaintDue(it, last) : today);
     const daysAgo = last ? dayDiff(last, today) : null;
     const overdue = nextDue < today;

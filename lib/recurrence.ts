@@ -44,10 +44,16 @@ export function maintInterval(item: { category: string; intervalDays?: number | 
 }
 
 // Próxima fecha de un maintenance food a partir de `fromDate` (la última toma).
-// 3x/semana → objetivo Lun/Mié/Vie: SIEMPRE +2 días, salvo el fin de semana (viernes → lunes = +3).
-// Así, en ritmo da L/X/V (2/2/3); y si se atrasa, todos los saltos de 2 mantienen ALTA la exposición
-// y re-sincronizan solos a L/X/V (nunca se agrega un 3 para "corregir"). El resto → cada N días fijos.
-export function nextMaintDue(item: { category: string; intervalDays?: number | null }, fromDate: string): string {
+// - Con FECHAS ESPECÍFICAS acordadas (p.ej. yema): la siguiente fecha de la lista (luego, semanal).
+// - 3x/semana → objetivo Lun/Mié/Vie: SIEMPRE +2 días, salvo el fin de semana (viernes → lunes = +3).
+//   Así, en ritmo da L/X/V (2/2/3); si se atrasa, los +2 mantienen ALTA la exposición y re-sincronizan solos.
+// - El resto → cada N días fijos.
+export function nextMaintDue(item: { category: string; intervalDays?: number | null; specificDates?: string | null }, fromDate: string): string {
+  const dates = (parseArr(item.specificDates) as string[]).filter((d) => typeof d === "string").sort();
+  if (dates.length > 0) {
+    const next = dates.find((d) => d > fromDate);
+    return next ?? addDays(fromDate, 7); // agotada la lista acordada → semanal
+  }
   if (item.category === "THREE_WEEK" && !(item.intervalDays && item.intervalDays > 0)) {
     return addDays(fromDate, weekdayOfDay(fromDate) === 5 ? 3 : 2); // viernes(5) → lunes; resto → +2
   }
