@@ -48,11 +48,17 @@ export function maintInterval(item: { category: string; intervalDays?: number | 
 // - 3x/semana → objetivo Lun/Mié/Vie: SIEMPRE +2 días, salvo el fin de semana (viernes → lunes = +3).
 //   Así, en ritmo da L/X/V (2/2/3); si se atrasa, los +2 mantienen ALTA la exposición y re-sincronizan solos.
 // - El resto → cada N días fijos.
-export function nextMaintDue(item: { category: string; intervalDays?: number | null; specificDates?: string | null }, fromDate: string): string {
+export function nextMaintDue(item: { category: string; intervalDays?: number | null; specificDates?: string | null; weekdays?: string | null }, fromDate: string): string {
   const dates = (parseArr(item.specificDates) as string[]).filter((d) => typeof d === "string").sort();
   if (dates.length > 0) {
     const next = dates.find((d) => d > fromDate);
-    return next ?? addDays(fromDate, 7); // agotada la lista acordada → semanal
+    return next ?? addDays(fromDate, 7); // agotada la lista → semanal
+  }
+  // Semanal con DÍA OBJETIVO (p.ej. yema los sábados): en ritmo +7; si cayó otro día, +6 para
+  // ir corriéndolo hasta caer en el objetivo, y ahí vuelve a semanal (+7) desde la fecha real.
+  const target = (parseArr(item.weekdays) as number[])[0];
+  if (item.category === "WEEKLY" && target != null && !(item.intervalDays && item.intervalDays > 0)) {
+    return addDays(fromDate, weekdayOfDay(fromDate) === target ? 7 : 6);
   }
   if (item.category === "THREE_WEEK" && !(item.intervalDays && item.intervalDays > 0)) {
     return addDays(fromDate, weekdayOfDay(fromDate) === 5 ? 3 : 2); // viernes(5) → lunes; resto → +2

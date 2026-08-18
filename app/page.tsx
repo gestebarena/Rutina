@@ -213,7 +213,12 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
     const last = lastByItem.get(it.id) ?? null;
     const iv = maintInterval(it);
     const hasDates = !!it.specificDates && it.specificDates !== "[]";
-    const cadence = hasDates ? "según fechas del plan" : it.category === "THREE_WEEK" ? "objetivo L/X/V" : `cada ${iv} días`;
+    let wtarget: number | null = null;
+    try { wtarget = (JSON.parse(it.weekdays || "[]") as number[])[0] ?? null; } catch { wtarget = null; }
+    const DAYS = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
+    const cadence = hasDates ? "según fechas del plan"
+      : it.category === "WEEKLY" && wtarget != null ? `semanal (${DAYS[wtarget]})`
+      : it.category === "THREE_WEEK" ? "objetivo L/X/V" : `cada ${iv} días`;
     const nextDue = open?.dueDate ?? (last ? nextMaintDue(it, last) : today);
     const daysAgo = last ? dayDiff(last, today) : null;
     const overdue = nextDue < today;

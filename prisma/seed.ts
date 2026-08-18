@@ -2,6 +2,7 @@ import "dotenv/config";
 import { PrismaClient } from "../app/generated/prisma/client";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import bcrypt from "bcryptjs";
+import { deriveRecurrence } from "../lib/recurrence";
 
 const adapter = new PrismaBetterSqlite3({ url: process.env.DATABASE_URL || "file:./dev.db" });
 const prisma = new PrismaClient({ adapter });
@@ -27,6 +28,8 @@ type I = {
   doseLevels?: string[];
   cycleStartDay?: string;
   doseDays?: string[];
+  recurrence?: string;
+  weekdays?: number[]; // día(s) objetivo para semanal con día fijo (0=dom..6=sáb)
   sortOrder: number;
 };
 
@@ -51,7 +54,7 @@ const items: I[] = [
   { id: "main-sesamo", name: "Sésamo", dose: "1/2 cdta", category: "THREE_WEEK", frequency: "3 x semana", times: [], sortOrder: 4 },
   { id: "tw-castana", name: "Castaña", dose: "1 cdta", category: "THREE_WEEK", frequency: "3 x semana", times: [], sortOrder: 5 },
   { id: "tw-macadamia", name: "Macadamia", dose: "1 unidad", category: "THREE_WEEK", frequency: "3 x semana", times: [], sortOrder: 6 },
-  { id: "tf-yema", name: "Yema de huevo cruda", dose: "14 ml", category: "THREE_WEEK", frequency: "días concretos → luego sábados", times: [], rule: "14 ml · 7,8,9/8 y 11,13,15/8; luego semanal (sábados)", doseDays: ["2026-08-07", "2026-08-08", "2026-08-09", "2026-08-11", "2026-08-13", "2026-08-15", "2026-08-22", "2026-08-29", "2026-09-05", "2026-09-12", "2026-09-19", "2026-09-26"], sortOrder: 7 },
+  { id: "tf-yema", name: "Yema de huevo cruda", dose: "14 ml", category: "WEEKLY", frequency: "semanal (sábados)", times: [], rule: "14 ml · semanal apuntando a sábado; si cae otro día, se corre de a 6 días hasta el sábado", recurrence: "WEEKLY", weekdays: [6], sortOrder: 7 },
 
   // --- MAINTENANCE semanal ---
   { id: "tw-pistacho", name: "Pistacho", dose: "8 unidades", category: "WEEKLY", frequency: "semanal", times: [], sortOrder: 1 },
@@ -97,6 +100,10 @@ async function main() {
   const keepIds = new Set(items.map((i) => i.id));
 
   for (const it of items) {
+    // Recurrencia: explícita si el item la trae (p.ej. yema semanal con día objetivo), o derivada.
+    const rec = it.recurrence
+      ? { recurrence: it.recurrence, weekdays: it.weekdays ? JSON.stringify(it.weekdays) : null, specificDates: null as string | null }
+      : deriveRecurrence({ category: it.category, intervalDays: it.intervalDays ?? null, doseDays: it.doseDays ? JSON.stringify(it.doseDays) : null });
     const data = {
       name: it.name,
       dose: it.dose,
@@ -110,6 +117,9 @@ async function main() {
       doseLevels: JSON.stringify(it.doseLevels ?? []),
       cycleStartDay: it.cycleStartDay ?? null,
       doseDays: JSON.stringify(it.doseDays ?? []),
+      recurrence: rec.recurrence,
+      weekdays: rec.weekdays,
+      specificDates: rec.specificDates,
       sortOrder: it.sortOrder,
       active: true,
     };
