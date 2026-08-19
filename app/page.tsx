@@ -98,7 +98,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
     if (o.status !== "TAKEN" && o.status !== "SKIPPED" && o.status !== "POSTPONED") continue;
     const k = `${o.itemId}|${o.slotId}`;
     if (!resolvedBySlot.has(k)) resolvedBySlot.set(k, []);
-    resolvedBySlot.get(k)!.push({ day: o.dueDate, status: o.status, time: o.takenTime ? parseTaken(o.takenTime, o.dueDate, anchorTz).time : null });
+    // "día" = la fecha REAL en que se tomó (takenTime), no el día del turno (dueDate) — pueden diferir en maintenance.
+    const realDay = o.takenTime && /^\d{4}-\d{2}-\d{2}/.test(o.takenTime) ? o.takenTime.slice(0, 10) : o.dueDate;
+    resolvedBySlot.get(k)!.push({ day: realDay, status: o.status, time: o.takenTime ? parseTaken(o.takenTime, o.dueDate, anchorTz).time : null });
   }
   const prevBefore = (itemId: string, slotId: string, beforeDay: string) => {
     const list = resolvedBySlot.get(`${itemId}|${slotId}`);
