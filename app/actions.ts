@@ -7,7 +7,7 @@ import { createSession, destroySession, getSession, hashPassword, verifyPassword
 import { normalizeWhen } from "@/lib/taken";
 import { madridDay, addDays } from "@/lib/madrid";
 import { deriveRecurrence, slotLabels, isMaintenance, nextMaintDue } from "@/lib/recurrence";
-import { regenerateFuture, ensureGenerated, createMaintenanceNext } from "@/lib/generate";
+import { regenerateFuture, ensureGenerated, createMaintenanceNext, ensureMaintenanceRolling } from "@/lib/generate";
 
 function dayOf(takenTime: string | null, fallback: string): string {
   return takenTime && /^\d{4}-\d{2}-\d{2}/.test(takenTime) ? takenTime.slice(0, 10) : fallback;
@@ -334,6 +334,30 @@ export async function markMissing(itemId: string): Promise<void> {
     await adjustStock(itemId, -1);
     await audit(session.userId, "MARK_TAKEN", "occurrence", occ.id, { via: "markMissing" });
   }
+  revalidatePath("/");
+}
+
+// Borra una marca (toma por error). Hace lo correcto según el tipo:
+// - maintenance: elimina esa toma y la "próxima" que hubiera generado, y recalcula la próxima real.
+// - medicina/treatment: la desmarca (vuelve a PENDING/MISSED su turno).
+export async function deleteMark(occId: string): Promise<void> {
+  const session = await getSession();
+  if (!session) redirect("/login");
+  const occ = await prisma.doseOccurrence.findUnique({ where: { id: occId } });
+  if (!occ) return;
+  const item = await prisma.item.findUnique({ where: { id: occ.itemId } });
+  const wasTaken = occ.status === "TAKEN";
+  if (item && isMaintenance(item)) {
+    await prisma.doseOccurrence.delete({ where: { id: occId } });
+    await prisma.doseOccurrence.deleteMany({ where: { itemId: occ.itemId, status: { in: ["PENDING", "POSTPONED"] } } });
+    if (wasTaken) await adjustStock(occ.itemId, +1);
+    await ensureMaintenanceRolling(prisma, madridDay());
+  } else {
+    const status = occ.dueDate < madridDay() ? "MISSED" : "PENDING";
+    await prisma.doseOccurrence.update({ where: { id: occId }, data: { status, takenTime: null, postponeUntil: null, note: null, takenById: null, recordedAt: null } });
+    if (wasTaken) await adjustStock(occ.itemId, +1);
+  }
+  await audit(session.userId, "DELETE_MARK", "occurrence", occId, { day: occ.dueDate });
   revalidatePath("/");
 }
 

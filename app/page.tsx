@@ -113,28 +113,27 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
 
   type Occ = (typeof occActive)[number];
 
-  // Historial por item (últimos 7 días) para el modal 🕘.
-  const historyByItem: Record<string, { day: string; marks: { slot: string; status: string; time: string | null }[] }[]> = {};
-  {
-    const byItemDay = new Map<string, Occ[]>();
-    for (const o of occActive) {
-      if (o.dueDate < histFrom || o.dueDate >= today) continue;
-      const it = itemById.get(o.itemId);
-      if (!it || !MUST_CATS.has(it.category)) continue;
-      const k = `${o.itemId}|${o.dueDate}`;
-      if (!byItemDay.has(k)) byItemDay.set(k, []);
-      byItemDay.get(k)!.push(o);
+  // Historial EDITABLE por item: tomas recientes con su occId, para ver/borrar/editar (corregir errores).
+  type EditDose = { occId: string; day: string; time: string | null; status: string; who: string; editWhen: string | null };
+  const editableByItem: Record<string, EditDose[]> = {};
+  const missingByItem: Record<string, number> = {}; // MISSED de MUST en 7 días (para "marcar los que faltan")
+  for (const o of occActive) {
+    const it = itemById.get(o.itemId);
+    if (!it) continue;
+    if (o.status === "MISSED" && MUST_CATS.has(it.category) && o.dueDate >= histFrom && o.dueDate < today) {
+      missingByItem[o.itemId] = (missingByItem[o.itemId] ?? 0) + 1;
     }
-    for (const it of items) {
-      const rows: { day: string; marks: { slot: string; status: string; time: string | null }[] }[] = [];
-      for (let d = histFrom; d < today; d = addDays(d, 1)) {
-        const list = byItemDay.get(`${it.id}|${d}`);
-        if (!list || list.length === 0) continue;
-        rows.push({ day: d, marks: list.map((o) => ({ slot: o.slotId, status: o.status, time: o.status === "TAKEN" || o.status === "POSTPONED" ? dispTime(o.status === "POSTPONED" ? o.postponeUntil : o.takenTime, d) : null })) });
-      }
-      if (rows.length) historyByItem[it.id] = rows;
-    }
+    if (o.status !== "TAKEN" && o.status !== "SKIPPED" && o.status !== "POSTPONED") continue;
+    const realDay = o.takenTime && /^\d{4}-\d{2}-\d{2}/.test(o.takenTime) ? o.takenTime.slice(0, 10) : o.dueDate;
+    (editableByItem[o.itemId] ??= []).push({
+      occId: o.id, day: realDay,
+      time: dispTime(o.status === "POSTPONED" ? o.postponeUntil : o.takenTime, realDay),
+      status: o.status,
+      who: userName.get(o.takenById ?? "") ?? "—",
+      editWhen: toViewerLocal(o.status === "POSTPONED" ? o.postponeUntil : o.takenTime),
+    });
   }
+  for (const k in editableByItem) { editableByItem[k].sort((a, b) => (a.day < b.day ? 1 : -1)); editableByItem[k] = editableByItem[k].slice(0, 12); }
 
   // Convierte una occurrence en un Slot para la UI.
   function occToSlot(o: Occ, opts: { must: boolean; foodNote?: string | null; forToday: boolean; maintAgenda?: boolean }): Slot {
@@ -182,7 +181,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
       stock: it.stock, stockLow, lastTakenAgo, dueInMin,
       foodNote: opts.foodNote ?? null,
       prev: prevBefore(o.itemId, o.slotId, o.dueDate),
-      hasHistory: !!historyByItem[o.itemId],
+      hasHistory: !!editableByItem[o.itemId]?.length,
       recordedBy: !opts.forToday && o.status !== "PENDING" && o.status !== "MISSED" ? (userName.get(o.takenById ?? "") ?? "—") : null,
       recordedAtLabel: !opts.forToday && o.status !== "PENDING" && o.status !== "MISSED" ? fmtRecorded(o.recordedAt) : null,
       editWhen: !opts.forToday && o.status !== "PENDING" && o.status !== "MISSED" ? toViewerLocal(o.status === "POSTPONED" ? o.postponeUntil : o.takenTime) : null,
@@ -345,7 +344,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
           backDays={backDays}
           treatmentTakenTimes={treatmentTakenTimes}
           nowMin={planNowMin}
-          historyByItem={historyByItem}
+          editableByItem={editableByItem}
+          missingByItem={missingByItem}
           viewerCode={tzCode(viewerTz)}
           anchorCode={tzCode(anchorTz)}
           viewerTz={viewerTz}

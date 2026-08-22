@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { markIntake, markMany, skipIntake, unmarkIntake, postponeIntake, markMissing } from "./actions";
+import { markIntake, markMany, skipIntake, unmarkIntake, postponeIntake, markMissing, deleteMark } from "./actions";
 import { shortDayLabel, addDays } from "@/lib/madrid";
 
 export type MaintRow = { itemId: string; occId: string | null; name: string; dose: string; frequency: string; interval: number; lastTaken: string | null; daysAgo: number | null; nextDue: string; overdue: boolean };
+export type EditDose = { occId: string; day: string; time: string | null; status: string; who: string; editWhen: string | null };
 function ddmm(d: string | null): string { return d ? d.slice(8, 10) + "/" + d.slice(5, 7) : "—"; }
 
 // Desfase (min) de una zona en un instante.
@@ -107,7 +108,8 @@ export default function TodayList({
   backDays,
   treatmentTakenTimes,
   nowMin,
-  historyByItem,
+  editableByItem,
+  missingByItem,
   viewerCode,
   anchorCode,
   viewerTz,
@@ -125,7 +127,8 @@ export default function TodayList({
   backDays: number;
   treatmentTakenTimes: { name: string; time: string }[];
   nowMin: number;
-  historyByItem: Record<string, DayHist[]>;
+  editableByItem: Record<string, EditDose[]>;
+  missingByItem: Record<string, number>;
   viewerCode: string;
   anchorCode: string;
   viewerTz: string;
@@ -144,14 +147,25 @@ export default function TodayList({
   const [pending, startTransition] = useTransition();
   const [skipTarget, setSkipTarget] = useState<{ occId: string; day: string; name: string } | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [histItem, setHistItem] = useState<{ itemId: string; name: string; hist: DayHist[] } | null>(null);
+  const [editItem, setEditItem] = useState<{ itemId: string; name: string } | null>(null);
+  const [delOcc, setDelOcc] = useState<string | null>(null); // confirmar borrado de una toma
   const [detail, setDetail] = useState<Slot | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);
   const [postDate, setPostDate] = useState(() => addDays(planToday, 2)); // calendario de posponer
   const [adjustPlan, setAdjustPlan] = useState(true); // maintenance: ¿ajustar el plan al mover/marcar?
 
-  function openHistory(s: Slot) {
-    setHistItem({ itemId: s.itemId, name: s.name, hist: historyByItem[s.itemId] ?? [] });
+  const maintIds = new Set(maintDetail.map((m) => m.itemId));
+  function openEdit(itemId: string, name: string) {
+    setDelOcc(null);
+    setEditItem({ itemId, name });
+  }
+  // Editar una toma del historial: abre el modal de marcado con su hora ya puesta.
+  function editDose(itemId: string, name: string, d: EditDose) {
+    setEditItem(null);
+    setWhen(d.editWhen || defaultWhen(d.day, null));
+    setShowPostpone(false);
+    setAdjustPlan(true);
+    setDialog({ title: name, day: d.day, slots: [{ itemId, slot: itemId, occId: d.occId }], isTreatment: false, isMaint: maintIds.has(itemId) });
   }
   function openDetail(s: Slot) {
     setConfirmDel(false);
@@ -319,7 +333,7 @@ export default function TodayList({
                     <ItemRow key={`${s.itemId}|${s.slot}`} s={s} pending={pending} start={startTransition}
                       onMark={() => openSingle(s)} big={isNextBucket && !s.taken && !s.skipped && !s.postponed}
                       selectable={pend.length > 1} selected={selected.has(`${s.itemId}|${s.slot}`)}
-                      onToggleSelect={() => toggleSelect(`${s.itemId}|${s.slot}`)} onHistory={() => openHistory(s)} />
+                      onToggleSelect={() => toggleSelect(`${s.itemId}|${s.slot}`)} onHistory={() => openEdit(s.itemId, s.name)} />
                   ))}
                 </div>
               </div>
@@ -390,6 +404,8 @@ export default function TodayList({
                   <p className="text-xs text-slate-500">{m.frequency} · última {ddmm(m.lastTaken)}{m.daysAgo != null ? ` (hace ${m.daysAgo} d)` : ""}</p>
                   <p className={`text-xs ${m.overdue ? "text-red-600 font-medium" : "text-slate-500"}`}>próxima: {ddmm(m.nextDue)}{m.overdue ? " · atrasado" : ""}</p>
                 </div>
+                <button onClick={() => openEdit(m.itemId, m.name)} disabled={pending} aria-label="historial / corregir"
+                  className="shrink-0 rounded-lg px-2 py-2 text-slate-400 hover:text-sky-600">🕘</button>
                 <button onClick={() => openMaintDialog(m)} disabled={pending}
                   className="shrink-0 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">🍽 Marcar</button>
               </div>
@@ -472,43 +488,48 @@ export default function TodayList({
         </div>
       )}
 
-      {histItem && (
-        <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4" onClick={() => setHistItem(null)}>
+      {editItem && (() => {
+        const list = editableByItem[editItem.itemId] ?? [];
+        const missing = missingByItem[editItem.itemId] ?? 0;
+        return (
+        <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4" onClick={() => setEditItem(null)}>
           <div className="bg-white rounded-3xl p-6 w-full max-w-sm max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-slate-800">{histItem.name}</h3>
-            <p className="text-slate-500 text-sm mb-3">Últimos 7 días · horas en {viewerCityLabel} ({viewerCode})</p>
-            {histItem.hist.length === 0 ? (
-              <p className="text-sm text-slate-400">Sin datos en los últimos 7 días.</p>
+            <h3 className="text-lg font-bold text-slate-800">{editItem.name}</h3>
+            <p className="text-slate-500 text-sm mb-3">Tomas recientes · tocá 🗑️ para borrar una marca por error, o ✏️ para corregir la fecha/hora.</p>
+            {list.length === 0 ? (
+              <p className="text-sm text-slate-400">Sin tomas registradas recientes.</p>
             ) : (
-              <div className="space-y-1.5">
-                {[...histItem.hist].reverse().map((d) => (
-                  <div key={d.day} className="flex gap-2 text-sm border-b border-slate-100 pb-1.5">
-                    <span className="w-20 shrink-0 capitalize text-slate-500">{shortDayLabel(d.day)}</span>
-                    <span className="flex-1 text-slate-700">
-                      {d.marks.map((m, i) => {
-                        const icon = m.status === "TAKEN" ? "✓" : m.status === "SKIPPED" ? "⏭" : m.status === "POSTPONED" ? "⏰" : "⚠️";
-                        const col = m.status === "TAKEN" ? "text-emerald-700" : m.status === "MISSED" ? "text-red-600" : "text-slate-500";
-                        const lbl = m.slot === "u" ? "" : `${m.slot} `;
-                        return <span key={i} className={`${col} mr-2 inline-block`}>{icon} {lbl}{m.status === "TAKEN" && m.time ? `(${m.time})` : ""}</span>;
-                      })}
-                    </span>
-                  </div>
-                ))}
+              <div className="divide-y divide-slate-100">
+                {list.map((d) => {
+                  const icon = d.status === "TAKEN" ? "✓" : d.status === "SKIPPED" ? "⏭" : "⏰";
+                  const col = d.status === "TAKEN" ? "text-emerald-700" : "text-slate-500";
+                  return (
+                    <div key={d.occId} className="flex items-center gap-2 py-2">
+                      <span className={`flex-1 min-w-0 text-sm ${col}`}>
+                        <span className="capitalize font-medium">{shortDayLabel(d.day)}</span>{d.time ? ` · ${d.time}` : ""} <span className="text-slate-400">· {d.who}</span>
+                      </span>
+                      <button onClick={() => editDose(editItem.itemId, editItem.name, d)} disabled={pending} className="shrink-0 rounded-lg px-2 py-1 text-slate-500 hover:text-sky-600">✏️</button>
+                      {delOcc === d.occId ? (
+                        <button onClick={() => startTransition(async () => { await deleteMark(d.occId); setDelOcc(null); setEditItem(null); })} disabled={pending} className="shrink-0 rounded-lg bg-red-600 px-2 py-1 text-xs font-semibold text-white">¿Borrar?</button>
+                      ) : (
+                        <button onClick={() => setDelOcc(d.occId)} disabled={pending} className="shrink-0 rounded-lg px-2 py-1 text-slate-500 hover:text-red-600">🗑️</button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
-            {(() => {
-              const missing = histItem.hist.reduce((n, d) => n + d.marks.filter((m) => m.status === "MISSED").length, 0);
-              return missing > 0 ? (
-                <button onClick={() => { const id = histItem.itemId; startTransition(async () => { await markMissing(id); setHistItem(null); }); }} disabled={pending}
-                  className="mt-3 w-full rounded-xl bg-emerald-600 py-2.5 font-semibold text-white disabled:opacity-60">
-                  ✓ Marcar los {missing} que faltan (a su hora del plan)
-                </button>
-              ) : null;
-            })()}
-            <button onClick={() => setHistItem(null)} className="mt-2 w-full rounded-xl border border-slate-300 py-2.5 font-medium text-slate-600">Cerrar</button>
+            {missing > 0 && (
+              <button onClick={() => { const id = editItem.itemId; startTransition(async () => { await markMissing(id); setEditItem(null); }); }} disabled={pending}
+                className="mt-3 w-full rounded-xl bg-emerald-600 py-2.5 font-semibold text-white disabled:opacity-60">
+                ✓ Marcar los {missing} que faltan (a su hora del plan)
+              </button>
+            )}
+            <button onClick={() => setEditItem(null)} className="mt-2 w-full rounded-xl border border-slate-300 py-2.5 font-medium text-slate-600">Cerrar</button>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {detail && (
         <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4" onClick={() => setDetail(null)}>
