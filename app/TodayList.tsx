@@ -53,6 +53,7 @@ export type Slot = {
   skippedReason?: string | null;
   stock?: number | null;
   stockLow?: boolean;
+  stockDays?: number | null;
   lastTakenAgo?: number | null;
   dueInMin?: number | null; // minutos hasta la hora prevista (negativo = ya pasó)
   prev?: { day: string; status: string; time: string | null } | null;
@@ -78,7 +79,9 @@ function toMin(t: string) {
   return h * 60 + m;
 }
 
-type MarkTarget = { title: string; day: string; slots: { itemId: string; slot: string; occId: string }[]; isTreatment: boolean; isMaint: boolean };
+type MarkTarget = { title: string; day: string; slots: { itemId: string; slot: string; occId: string }[]; isTreatment: boolean; isMaint: boolean; planTime: string | null };
+// Alérgenos (treatment + maintenance) arrancan en la hora ACTUAL; las medicinas, en su hora del plan.
+function startsNow(category: string): boolean { return category !== "MED"; }
 type Bucket = { time: string | null; planTime: string | null; altTime: string | null; slots: Slot[] };
 
 function bucketByTime(slots: Slot[]): Bucket[] {
@@ -165,7 +168,7 @@ export default function TodayList({
     setWhen(d.editWhen || defaultWhen(d.day, null));
     setShowPostpone(false);
     setAdjustPlan(true);
-    setDialog({ title: name, day: d.day, slots: [{ itemId, slot: itemId, occId: d.occId }], isTreatment: false, isMaint: maintIds.has(itemId) });
+    setDialog({ title: name, day: d.day, slots: [{ itemId, slot: itemId, occId: d.occId }], isTreatment: false, isMaint: maintIds.has(itemId), planTime: null });
   }
   function openDetail(s: Slot) {
     setConfirmDel(false);
@@ -178,7 +181,7 @@ export default function TodayList({
     setDetail(null);
     setWhen(s.editWhen || defaultWhen(s.day, s.planTime ?? null));
     setShowPostpone(false);
-    setDialog({ title: s.name, day: s.day, slots: [{ itemId: s.itemId, slot: s.slot, occId: s.occId }], isTreatment: s.category === "TREATMENT", isMaint: isMaintCat(s.category) });
+    setDialog({ title: s.name, day: s.day, slots: [{ itemId: s.itemId, slot: s.slot, occId: s.occId }], isTreatment: s.category === "TREATMENT", isMaint: isMaintCat(s.category), planTime: s.planTime ?? null });
   }
   const nextRef = useRef<HTMLDivElement>(null);
   const todayRef = useRef<HTMLDivElement>(null);
@@ -203,29 +206,30 @@ export default function TodayList({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Sugerencia por defecto del selector: la hora del PLAN si la toma ya no es reciente
-  // (su hora prevista pasó hace más de 90 min, o es de un día anterior); si no, "ahora".
-  function defaultWhen(day: string, planSlotTime: string | null): string {
-    if (planSlotTime && /^\d{2}:\d{2}$/.test(planSlotTime)) {
-      const planMs = wallToMs(`${day}T${planSlotTime}`, anchorTz);
-      if (Date.now() - planMs > 90 * 60000) return msToLocal(planMs, viewerTz);
+  // Base por defecto del selector:
+  // - medicinas → su HORA DEL PLAN (la hora en que debería tomarse ese día);
+  // - alérgenos (treatment + maintenance) → la hora ACTUAL.
+  // En ambos casos el reloj queda editable (y hay botones rápidos Ahora / Hora del plan).
+  function defaultWhen(day: string, planSlotTime: string | null, preferNow = false): string {
+    if (!preferNow && planSlotTime && /^\d{2}:\d{2}$/.test(planSlotTime)) {
+      return msToLocal(wallToMs(`${day}T${planSlotTime}`, anchorTz), viewerTz);
     }
     return msToLocal(Date.now(), viewerTz);
   }
-  function openDialog(title: string, day: string, slots: { itemId: string; slot: string; occId: string }[], isTreatment: boolean, planSlotTime: string | null, isMaint = false) {
-    setWhen(defaultWhen(day, planSlotTime));
+  function openDialog(title: string, day: string, slots: { itemId: string; slot: string; occId: string }[], isTreatment: boolean, planSlotTime: string | null, isMaint = false, preferNow = false) {
+    setWhen(defaultWhen(day, planSlotTime, preferNow));
     setShowPostpone(false);
     setAdjustPlan(true);
     setPostDate(addDays(planToday, 2));
-    setDialog({ title, day, slots, isTreatment, isMaint });
+    setDialog({ title, day, slots, isTreatment, isMaint, planTime: planSlotTime });
   }
   function openSingle(s: Slot) {
-    openDialog(s.name, s.day, [{ itemId: s.itemId, slot: s.slot, occId: s.occId }], s.category === "TREATMENT", s.planTime ?? null, isMaintCat(s.category));
+    openDialog(s.name, s.day, [{ itemId: s.itemId, slot: s.slot, occId: s.occId }], s.category === "TREATMENT", s.planTime ?? null, isMaintCat(s.category), startsNow(s.category));
   }
   // Desde la sección de maintenance foods: abre el MISMO modal (no marca de una).
   function openMaintDialog(m: MaintRow) {
     if (!m.occId) return;
-    openDialog(m.name, planToday, [{ itemId: m.itemId, slot: m.itemId, occId: m.occId }], false, null, true);
+    openDialog(m.name, planToday, [{ itemId: m.itemId, slot: m.itemId, occId: m.occId }], false, null, true, true);
   }
   function openPack(b: Bucket, day: string) {
     const pend = b.slots.filter((s) => !s.taken && !s.skipped && !s.postponed);
@@ -427,6 +431,15 @@ export default function TodayList({
                 className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-3 text-lg text-center focus:border-sky-500 focus:outline-none" />
               <span className="mt-1 block text-center text-sm font-medium text-sky-700">Anotando: {dayLabel} · hora local de Nico ({viewerCode})</span>
             </label>
+            {/* Base rápida: hora actual o la hora del plan (igual podés ajustar el reloj de arriba). */}
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => setWhen(msToLocal(Date.now(), viewerTz))}
+                className="rounded-xl border border-slate-200 py-2 text-sm font-medium text-slate-700">🕐 Ahora</button>
+              {dialog.planTime && /^\d{2}:\d{2}$/.test(dialog.planTime) && (
+                <button type="button" onClick={() => setWhen(msToLocal(wallToMs(`${dialog.day}T${dialog.planTime}`, anchorTz), viewerTz))}
+                  className="rounded-xl border border-slate-200 py-2 text-sm font-medium text-slate-700">⏰ Hora del plan ({dialog.planTime})</button>
+              )}
+            </div>
             {warning && <p className="mt-3 text-sm text-amber-700 bg-amber-50 rounded-xl p-3">⚠️ {warning}</p>}
             {dialog.isMaint && (
               <label className="mt-3 flex items-start gap-2 text-xs text-slate-600 bg-violet-50 rounded-xl p-2.5">
@@ -705,7 +718,7 @@ function ItemRow({ s, pending, start, onMark, big, selectable, selected, onToggl
           <span className={`font-semibold ${s.must && (s.category === "WEEKLY" || s.category === "BIWEEKLY") ? "text-red-700" : "text-slate-800"} ${big ? "text-lg" : ""}`}>{catIcon(s.category)} {s.name}</span>
           {s.capped && <span className="text-xs font-medium text-amber-700 bg-amber-100 rounded-full px-2 py-0.5">tope</span>}
           {s.levelLabel && <span className="text-xs font-medium text-violet-700 bg-violet-100 rounded-full px-2 py-0.5">{s.levelLabel}</span>}
-          {s.stockLow && <span className="text-xs font-medium text-orange-700 bg-orange-100 rounded-full px-2 py-0.5">quedan {s.stock}</span>}
+          {s.stockLow && <span className="text-xs font-medium text-orange-700 bg-orange-100 rounded-full px-2 py-0.5">{s.stockDays != null ? `~${s.stockDays} ${s.stockDays === 1 ? "día" : "días"}` : `quedan ${s.stock}`}</span>}
         </span>
         <span className="block text-sm text-slate-500">{s.dose} · {s.frequency}</span>
         {s.foodNote && <span className={`block text-xs mt-0.5 ${s.must ? "text-red-600" : "text-slate-400"}`}>{s.must ? "⚠️ " : "🗓️ "}{s.foodNote}</span>}

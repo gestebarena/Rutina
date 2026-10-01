@@ -49,8 +49,12 @@ model Item {
   capped    Boolean  @default(false)
   active    Boolean  @default(true)
   sortOrder Int      @default(0)
-  stock        Int? // tomas restantes (null = no se controla el stock)
-  stockAlertAt Int? // avisar cuando queden estas o menos
+  stock        Float? // cantidad restante en la unidad base de stockUnit (mg, pastillas o tomas); null = no se controla
+  stockUnit    String? // "mg" | "pill" | "dose" — unidad base del stock
+  perDose      Float? // cuánto se descuenta de stock por cada toma marcada (mg/toma, pastillas/toma o 1)
+  presentations String @default("[]") // JSON de presentaciones en mg para cargar/recontar, p.ej. [5,3,1,0.5]; vacío = una sola cuenta
+  stockAlertAt Int? // (obsoleto) umbral en TOMAS; sustituido por stockAlertDays
+  stockAlertDays Int? // avisar cuando falten estos días o menos (null = usar el default global de Config)
   intakes   Intake[]
   slots       ItemSlot[]
   occurrences DoseOccurrence[]
@@ -116,6 +120,7 @@ model Config {
   trackingStart String? // desde qué día "AAAA-MM-DD" se cuentan las atrasadas
   planTimezone  String  @default("Europe/Madrid") // ANCLA del plan: las horas "07:30" son de esta zona (fija; solo la cambia el modo viaje)
   nicoTimezone  String  @default("Europe/Madrid") // dónde está Nico ahora (cambia al viajar; solo afecta cómo se ven las horas)
+  stockAlertDays Int    @default(7) // default global: avisar cuando a una medicina le falten estos días o menos
 }
 
 // Suscripción de un móvil para recibir avisos (Web Push).

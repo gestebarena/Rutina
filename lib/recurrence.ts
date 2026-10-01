@@ -105,6 +105,33 @@ export function resolveDose(item: ItemLike, day: string): string {
   return item.dose;
 }
 
+// --- Horarios que cambian entre semana (L-V) y fin de semana (S-D) ---
+// Clave: itemId → (label de slot → { weekday, weekend }). Si el item+slot no está aquí,
+// se usa la hora fija del slot tal cual. weekdayOfDay: 0=dom .. 6=sáb → finde = 6 o 0.
+// NOTA: el Myfortic de la noche se movió de 20:00 a 19:30 (así entre semana queda con el
+// Fero y los findes con el MagneCit). Cambiar estos valores recalcula las tomas futuras.
+const WEEKDAY_TIME_OVERRIDES: Record<string, Record<string, { weekday: string; weekend: string }>> = {
+  "med-magnecit": {
+    "mediodía": { weekday: "16:45", weekend: "13:45" },
+    "noche": { weekday: "21:30", weekend: "19:30" },
+  },
+  "med-fero": {
+    "único": { weekday: "19:30", weekend: "15:45" },
+  },
+  "med-myfortic": {
+    "noche": { weekday: "19:30", weekend: "19:30" },
+  },
+};
+
+// Hora del plan para una toma concreta: aplica el override finde/entre-semana si el
+// item+slot lo define; si no, la hora fija del slot. `day` = fecha de la toma (ancla MAD).
+export function plannedTimeFor(itemId: string, slotLabel: string, slotTime: string | null, day: string): string | null {
+  const ov = WEEKDAY_TIME_OVERRIDES[itemId]?.[slotLabel];
+  if (!ov) return slotTime;
+  const wd = weekdayOfDay(day);
+  return wd === 0 || wd === 6 ? ov.weekend : ov.weekday;
+}
+
 // Clave de período: diario = la fecha; semanal = lunes de la semana; quincenal = índice de quincena.
 export function periodKeyFor(item: { recurrence: string }, day: string): string {
   if (item.recurrence === "WEEKLY") return "W:" + mondayOf(day);

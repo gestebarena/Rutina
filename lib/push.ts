@@ -12,10 +12,11 @@ function configure() {
   configured = true;
 }
 
-// Envía un aviso a TODOS los móviles suscritos. Borra los que ya no valen.
-export async function sendToAll(title: string, body: string): Promise<number> {
+type Sub = { id: string; endpoint: string; p256dh: string; auth: string };
+
+// Envía un payload a una lista concreta de suscripciones. Borra las caducadas.
+async function sendTo(subs: Sub[], title: string, body: string): Promise<number> {
   configure();
-  const subs = await prisma.pushSub.findMany();
   const payload = JSON.stringify({ title, body });
   let ok = 0;
   for (const s of subs) {
@@ -34,4 +35,18 @@ export async function sendToAll(title: string, body: string): Promise<number> {
     }
   }
   return ok;
+}
+
+// Envía un aviso a TODOS los móviles suscritos.
+export async function sendToAll(title: string, body: string): Promise<number> {
+  return sendTo(await prisma.pushSub.findMany(), title, body);
+}
+
+// Envía un aviso solo a los móviles de los usuarios ADMIN (mamá y papá).
+export async function sendToAdmins(title: string, body: string): Promise<number> {
+  const admins = await prisma.user.findMany({ where: { role: "ADMIN" }, select: { id: true } });
+  const ids = admins.map((a) => a.id);
+  if (ids.length === 0) return 0;
+  const subs = await prisma.pushSub.findMany({ where: { userId: { in: ids } } });
+  return sendTo(subs, title, body);
 }

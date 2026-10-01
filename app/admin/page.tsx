@@ -48,6 +48,14 @@ export default async function AdminPage() {
           <Link href="/admin/viaje" className="inline-block mt-3 text-sky-700 text-sm font-medium">✈️ Planificar un viaje (ajuste de horas) ›</Link>
         </section>
 
+        <Link href="/admin/inventario" className="flex items-center justify-between bg-white rounded-2xl shadow-sm p-5">
+          <span>
+            <span className="font-semibold text-slate-800">📦 Inventario de medicinas</span>
+            <span className="block text-xs text-slate-400">Cuánto queda y aviso cuando falte poco.</span>
+          </span>
+          <span className="text-sky-700 text-sm shrink-0 ml-2">Abrir ›</span>
+        </Link>
+
         <p className="text-sm text-slate-500 bg-white rounded-2xl p-4">
           Los treatment foods suben de dosis solos al cumplir sus tomas. Para forzar o corregir el nivel,
           edita el alérgeno y mira el apartado <strong>“Escalera de dosis”</strong>.

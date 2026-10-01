@@ -1,7 +1,7 @@
 // Generación idempotente de occurrences. Nunca sobrescribe una fila existente
 // (el pasado y lo ya marcado quedan congelados). Sirve para el backfill y para el runtime.
 import { addDays } from "./madrid";
-import { ItemLike, isDueOn, isPeriodItem, isMaintenance, nextMaintDue, resolveDose, periodKeyFor, periodDueDate } from "./recurrence";
+import { ItemLike, isDueOn, isPeriodItem, isMaintenance, nextMaintDue, resolveDose, periodKeyFor, periodDueDate, plannedTimeFor } from "./recurrence";
 
 type SlotRow = { id: string; label: string; time: string | null; active: boolean };
 type ItemWithSlots = ItemLike & { active: boolean; category: string; slots: SlotRow[] };
@@ -45,7 +45,7 @@ export async function generateOccurrences(
         for (const slot of item.slots) {
           const key = `${item.id}|${slot.id}|${d}`;
           if (existing.has(key)) continue;
-          toCreate.push({ itemId: item.id, slotId: slot.id, periodKey: d, dueDate: d, plannedTime: slot.time, plannedDose: resolveDose(item, d), status: d < today ? "MISSED" : "PENDING" });
+          toCreate.push({ itemId: item.id, slotId: slot.id, periodKey: d, dueDate: d, plannedTime: plannedTimeFor(item.id, slot.label, slot.time, d), plannedDose: resolveDose(item, d), status: d < today ? "MISSED" : "PENDING" });
         }
       }
     }

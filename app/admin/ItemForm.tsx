@@ -16,7 +16,7 @@ type Item = {
   doseLevels: string;
   cycleStartDay: string | null;
   stock: number | null;
-  stockAlertAt: number | null;
+  stockAlertDays: number | null;
   sortOrder: number;
 };
 
@@ -98,21 +98,6 @@ export default function ItemForm({ item, defaultCategory }: { item?: Item; defau
           <input type="checkbox" name="capped" defaultChecked={item?.capped} className="h-5 w-5" />
           <span className="text-sm text-slate-700">Tiene tope (no exceder)</span>
         </label>
-
-        <details className="rounded-xl bg-slate-50 p-3" open={!!item && item.stock !== null}>
-          <summary className="text-sm font-medium text-slate-700 cursor-pointer">📦 Stock (opcional)</summary>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <label className="block">
-              <span className="text-xs font-medium text-slate-700">Tomas que quedan</span>
-              <input name="stock" type="number" min="0" defaultValue={item?.stock ?? ""} className={inputCls} placeholder="vacío = no controlar" />
-            </label>
-            <label className="block">
-              <span className="text-xs font-medium text-slate-700">Avisar cuando queden</span>
-              <input name="stockAlertAt" type="number" min="0" defaultValue={item?.stockAlertAt ?? ""} className={inputCls} placeholder="ej. 7" />
-            </label>
-          </div>
-          <p className="text-xs text-slate-400 mt-1">Cada toma marcada descuenta 1. Cuando quede poco, saldrá un aviso.</p>
-        </details>
 
         <details className="rounded-xl bg-amber-50 p-3" open={!!item && levelsToText(item.doseLevels).length > 0}>
           <summary className="text-sm font-medium text-slate-700 cursor-pointer">Escalera de dosis (treatment foods)</summary>

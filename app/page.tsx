@@ -7,6 +7,7 @@ import { doseLevelForDay } from "@/lib/schedule";
 import { MEDALS } from "@/lib/stats";
 import { ensureGenerated } from "@/lib/generate";
 import { isMaintenance, maintInterval, nextMaintDue } from "@/lib/recurrence";
+import { unitsPerDay, daysOfSupply, effectiveThreshold, unitLabel } from "@/lib/stock";
 import { convertWallTime, tzCode, tzLabel, wallTimeToMs } from "@/lib/tz";
 import { parseTaken } from "@/lib/taken";
 import { logout } from "./actions";
@@ -74,11 +75,18 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
   const fetchHi = addDays(today, 14);
 
   const [items, occs, users] = await Promise.all([
-    prisma.item.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" } }),
+    prisma.item.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" }, include: { slots: { where: { active: true } } } }),
     prisma.doseOccurrence.findMany({ where: { dueDate: { gte: fetchLo, lte: fetchHi } } }),
     prisma.user.findMany({ select: { id: true, name: true } }),
   ]);
   const itemById = new Map(items.map((it) => [it.id, it]));
+  // Stock bajo en DÍAS de cobertura (stock ÷ consumo medio diario) vs. el umbral (override o default global).
+  const stockDaysByItem = new Map<string, number>();
+  for (const it of items) {
+    if (it.stock === null || it.stock === undefined) continue;
+    const days = daysOfSupply(it.stock, unitsPerDay(it, it.slots.length));
+    if (Number.isFinite(days) && days <= effectiveThreshold(it, config)) stockDaysByItem.set(it.id, days);
+  }
   const userName = new Map(users.map((u) => [u.id, u.name]));
   // Solo occurrences de items activos.
   const occActive = occs.filter((o) => itemById.has(o.itemId));
@@ -165,7 +173,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
       if (planned) dueInMin = Math.round((wallTimeToMs(o.dueDate, planned, anchorTz) - Date.now()) / 60000);
     }
     const fastUntil = it.id === "med-advagraf" && taken && o.takenTime ? dispTime(`${o.dueDate} ${addMinutes(o.takenTime.slice(11, 16), 60)}`, o.dueDate) : null;
-    const stockLow = it.stock !== null && it.stockAlertAt !== null && it.stock <= it.stockAlertAt;
+    const stockLow = stockDaysByItem.has(it.id);
 
     return {
       occId: o.id, itemId: o.itemId, slot: o.slotId, day: agendaDay,
@@ -178,7 +186,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
       must: opts.must,
       levelLabel, progressLabel, fastUntil,
       skippedReason: skipped ? o.note ?? null : null,
-      stock: it.stock, stockLow, lastTakenAgo, dueInMin,
+      stock: it.stock, stockLow, stockDays: stockDaysByItem.get(it.id) ?? null, lastTakenAgo, dueInMin,
       foodNote: opts.foodNote ?? null,
       prev: prevBefore(o.itemId, o.slotId, o.dueDate),
       hasHistory: !!editableByItem[o.itemId]?.length,
@@ -263,8 +271,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
 
   const allDone = mustPending === 0 && missedCount === 0;
   const lowStock = items
-    .filter((it) => it.stock !== null && it.stockAlertAt !== null && it.stock <= it.stockAlertAt)
-    .map((it) => ({ name: it.name, stock: it.stock as number }));
+    .filter((it) => stockDaysByItem.has(it.id))
+    .map((it) => ({ name: it.name, stock: it.stock as number, unit: unitLabel(it.stockUnit, it.stock as number), days: stockDaysByItem.get(it.id) as number }));
 
   // Racha y estrellas desde occurrences (días completos = sin obligatorias sin resolver).
   const dayAgg = new Map<string, { total: number; done: number }>();
@@ -332,7 +340,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
           <div className="rounded-2xl bg-orange-50 border border-orange-200 p-4">
             <p className="font-semibold text-orange-800">📦 Se está acabando</p>
             <ul className="text-sm text-orange-700 mt-1">
-              {lowStock.map((s) => (<li key={s.name}>· {s.name}: quedan {s.stock}</li>))}
+              {lowStock.map((s) => (<li key={s.name}>· {s.name}: ~{s.days} {s.days === 1 ? "día" : "días"} (quedan {s.stock} {s.unit})</li>))}
             </ul>
           </div>
         )}

@@ -8,6 +8,7 @@ import { normalizeWhen } from "@/lib/taken";
 import { madridDay, addDays } from "@/lib/madrid";
 import { deriveRecurrence, slotLabels, isMaintenance, nextMaintDue } from "@/lib/recurrence";
 import { regenerateFuture, ensureGenerated, createMaintenanceNext, ensureMaintenanceRolling } from "@/lib/generate";
+import { presentationsMg } from "@/lib/stock";
 
 function dayOf(takenTime: string | null, fallback: string): string {
   return takenTime && /^\d{4}-\d{2}-\d{2}/.test(takenTime) ? takenTime.slice(0, 10) : fallback;
@@ -41,11 +42,14 @@ async function audit(actorId: string | null, action: string, entity: string, ent
   await prisma.auditLog.create({ data: { actorId, action, entity, entityId, detail: detail ? JSON.stringify(detail) : null } });
 }
 
-// Descuenta (o repone) una unidad del stock si el item lo controla.
+// Descuenta (o repone) stock al marcar/desmarcar una toma, en la UNIDAD BASE del item.
+// delta = ±1 toma; se multiplica por perDose (mg/toma, pastillas/toma o 1) para saber cuánto mover.
+// Advagraf resta 7 mg por toma, MagneCit 2 pastillas, Saizen 1 toma, etc. (ver lib/stock.ts).
 async function adjustStock(itemId: string, delta: number): Promise<void> {
   const it = await prisma.item.findUnique({ where: { id: itemId } });
   if (!it || it.stock === null || it.stock === undefined) return;
-  await prisma.item.update({ where: { id: itemId }, data: { stock: Math.max(0, it.stock + delta) } });
+  const per = it.perDose ?? 1;
+  await prisma.item.update({ where: { id: itemId }, data: { stock: Math.max(0, it.stock + delta * per) } });
 }
 
 // Cambia solo DÓNDE ESTÁ NICO (no toca el plan). Ajusta cómo se ven las horas.
@@ -113,8 +117,6 @@ export async function saveItem(formData: FormData): Promise<void> {
     .split("\n").map((s) => s.trim()).filter(Boolean);
   const cycleRaw = String(formData.get("cycleStartDay") || "").trim();
   const cycleStartDay = /^\d{4}-\d{2}-\d{2}$/.test(cycleRaw) ? cycleRaw : null;
-  const stockRaw = String(formData.get("stock") || "").trim();
-  const alertRaw = String(formData.get("stockAlertAt") || "").trim();
   const dose = levels.length > 0 ? levels[0] : String(formData.get("dose") || "").trim();
   const category = String(formData.get("category") || "MED");
   const intervalDays = intervalRaw ? Math.max(1, parseInt(intervalRaw, 10)) : null;
@@ -133,10 +135,10 @@ export async function saveItem(formData: FormData): Promise<void> {
     anchorDay: /^\d{4}-\d{2}-\d{2}$/.test(anchorRaw) ? anchorRaw : null,
     doseLevels: JSON.stringify(levels),
     cycleStartDay,
-    stock: stockRaw === "" ? null : Math.max(0, parseInt(stockRaw, 10) || 0),
-    stockAlertAt: alertRaw === "" ? null : Math.max(0, parseInt(alertRaw, 10) || 0),
     sortOrder: parseInt(String(formData.get("sortOrder") || "0"), 10) || 0,
   };
+  // Nota: el stock y el umbral de aviso NO se tocan aquí; se gestionan en 📦 Inventario
+  // (así editar una medicina nunca pisa la cantidad cargada por el admin).
 
   let itemId = id;
   if (id) {
@@ -163,6 +165,65 @@ export async function deleteItem(formData: FormData): Promise<void> {
   if (id) await prisma.item.delete({ where: { id } }); // cascada borra slots y occurrences
   revalidatePath("/");
   redirect("/admin");
+}
+
+// --- Inventario (solo admin) ---
+
+function revalidateInventario() {
+  revalidatePath("/admin/inventario");
+  revalidatePath("/");
+}
+
+// Carga/recuento del stock de una medicina (carga inicial o reality-check al recontar).
+// Medicinas en mg: llegan las cantidades por presentación (c_0, c_1... en el orden de
+// item.presentations) y se suma strength×cantidad → mg totales. Resto: una cuenta única
+// en "stock" (pastillas o tomas). Un campo vacío/sin cantidades = dejar de controlar (null).
+export async function setStockLevel(formData: FormData): Promise<void> {
+  const session = await requireAdmin();
+  const itemId = String(formData.get("itemId") || "").trim();
+  if (!itemId) return;
+  const it = await prisma.item.findUnique({ where: { id: itemId } });
+  if (!it) return;
+  const strengths = presentationsMg(it);
+
+  let stock: number | null;
+  let detail: Record<string, unknown>;
+  if (strengths.length > 0) {
+    // Por presentación: sumamos mg. Si no se cargó ninguna cantidad, dejamos de controlar.
+    const counts = strengths.map((_, i) => Math.max(0, parseInt(String(formData.get(`c_${i}`) || ""), 10) || 0));
+    const total = strengths.reduce((acc, mg, i) => acc + mg * counts[i], 0);
+    const any = counts.some((n) => n > 0) || strengths.some((_, i) => String(formData.get(`c_${i}`) || "").trim() !== "");
+    stock = any ? total : null;
+    detail = { mode: "mg", counts: Object.fromEntries(strengths.map((mg, i) => [mg, counts[i]])), total };
+  } else {
+    const raw = String(formData.get("stock") || "").trim();
+    stock = raw === "" ? null : Math.max(0, parseFloat(raw) || 0);
+    detail = { mode: it.stockUnit ?? "count", stock };
+  }
+  await prisma.item.update({ where: { id: itemId }, data: { stock } });
+  await audit(session.userId, "SET_STOCK", "item", itemId, detail);
+  revalidateInventario();
+}
+
+// Fija el umbral de aviso en DÍAS para una medicina concreta (vacío = usar el default global).
+export async function setItemStockAlertDays(formData: FormData): Promise<void> {
+  const session = await requireAdmin();
+  const itemId = String(formData.get("itemId") || "").trim();
+  if (!itemId) return;
+  const raw = String(formData.get("stockAlertDays") || "").trim();
+  const stockAlertDays = raw === "" ? null : Math.max(1, parseInt(raw, 10) || 1);
+  await prisma.item.update({ where: { id: itemId }, data: { stockAlertDays } });
+  await audit(session.userId, "SET_STOCK_ALERT_DAYS", "item", itemId, { stockAlertDays });
+  revalidateInventario();
+}
+
+// Fija el default global de aviso en días (Config, fila id=1).
+export async function setGlobalStockAlertDays(formData: FormData): Promise<void> {
+  const session = await requireAdmin();
+  const days = Math.max(1, parseInt(String(formData.get("stockAlertDays") || "7"), 10) || 7);
+  await prisma.config.upsert({ where: { id: 1 }, update: { stockAlertDays: days }, create: { id: 1, stockAlertDays: days } });
+  await audit(session.userId, "SET_GLOBAL_STOCK_ALERT_DAYS", "config", "1", { days });
+  revalidateInventario();
 }
 
 export async function login(_prev: string | null, formData: FormData): Promise<string | null> {

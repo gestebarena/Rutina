@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { sendToAll } from "@/lib/push";
+import { sendToAll, sendToAdmins } from "@/lib/push";
 import { ensureGenerated } from "@/lib/generate";
+import { unitsPerDay, daysOfSupply, effectiveThreshold, unitLabel } from "@/lib/stock";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest) {
   const [items, occs, notified] = await Promise.all([
     prisma.item.findMany({ where: { active: true } }),
     prisma.doseOccurrence.findMany({ where: { dueDate: today, status: { in: ["PENDING", "MISSED"] } } }),
-    prisma.notified.findMany({ where: { key: { startsWith: `${today}|` } } }),
+    prisma.notified.findMany({ where: { OR: [{ key: { startsWith: `${today}|` } }, { key: { endsWith: `|${today}` } }] } }),
   ]);
   const itemById = new Map(items.map((it) => [it.id, it]));
   const alreadyNotified = new Set(notified.map((n) => n.key));
@@ -49,13 +50,41 @@ export async function GET(req: NextRequest) {
     newKeys.push(key);
   }
 
-  if (missed.length === 0) return NextResponse.json({ sent: 0, missed: 0 });
+  let sent = 0;
+  if (missed.length > 0) {
+    const title = missed.length === 1 ? "Rutina: falta una toma" : `Rutina: faltan ${missed.length} tomas`;
+    const body = missed.map((m) => `${m.name} (${m.time})`).join(", ");
+    sent = await sendToAll(title, body);
+    await prisma.notified.createMany({ data: newKeys.map((key) => ({ key })) });
+  }
 
-  const title = missed.length === 1 ? "Rutina: falta una toma" : `Rutina: faltan ${missed.length} tomas`;
-  const body = missed.map((m) => `${m.name} (${m.time})`).join(", ");
-  const sent = await sendToAll(title, body);
+  // --- Aviso de stock bajo (inventario de medicinas): solo a admins ---
+  const medsWithStock = await prisma.item.findMany({
+    where: { active: true, category: "MED", stock: { not: null } },
+    include: { slots: { where: { active: true } } },
+  });
+  const lowStock: { name: string; days: number; stock: number; unit: string }[] = [];
+  const stockKeys: string[] = [];
+  for (const it of medsWithStock) {
+    const upd = unitsPerDay(it, it.slots.length);
+    const days = daysOfSupply(it.stock as number, upd);
+    const threshold = effectiveThreshold(it, config);
+    if (!Number.isFinite(days) || days > threshold) continue;
+    const key = `stocklow|${it.id}|${today}`; // máx. 1 aviso por medicina y día
+    if (alreadyNotified.has(key)) continue;
+    lowStock.push({ name: it.name, days, stock: it.stock as number, unit: unitLabel(it.stockUnit, it.stock as number) });
+    stockKeys.push(key);
+  }
 
-  await prisma.notified.createMany({ data: newKeys.map((key) => ({ key })) });
+  let stockSent = 0;
+  if (lowStock.length > 0) {
+    const title = lowStock.length === 1 ? "Rutina: stock bajo" : `Rutina: ${lowStock.length} medicinas con stock bajo`;
+    const body = lowStock
+      .map((s) => `${s.name}: ~${s.days} ${s.days === 1 ? "día" : "días"} (quedan ${s.stock} ${s.unit})`)
+      .join(", ");
+    stockSent = await sendToAdmins(title, body);
+    await prisma.notified.createMany({ data: stockKeys.map((key) => ({ key })) });
+  }
 
-  return NextResponse.json({ sent, missed: missed.length });
+  return NextResponse.json({ sent, missed: missed.length, stockSent, stockLow: lowStock.length });
 }
