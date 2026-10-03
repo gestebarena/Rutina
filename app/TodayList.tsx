@@ -357,7 +357,7 @@ export default function TodayList({
             {pendingList.map(({ s, label }) => (
               <button key={s.occId} onClick={() => openSingle(s)} disabled={pending} className="w-full flex items-center gap-2 text-left text-sm py-1 disabled:opacity-60">
                 <span className="w-5 shrink-0 text-center">{catIcon(s.category)}</span>
-                <span className="flex-1 min-w-0 truncate text-slate-800">{s.name}</span>
+                <span className="flex-1 min-w-0 truncate text-slate-800">{s.name}{s.dose ? <span className="text-slate-500"> · {s.dose}</span> : ""}</span>
                 <span className="shrink-0 text-xs text-slate-500">{label === "hoy" ? (s.time ?? "hoy") : label === "food" ? "🥣" : label}</span>
                 <span className="shrink-0 text-slate-300">›</span>
               </button>
@@ -404,7 +404,7 @@ export default function TodayList({
             {sortedMaint.map((m) => (
               <div key={m.itemId} className="p-3 flex items-center gap-3">
                 <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-slate-800 truncate">{m.name} <span className="text-xs font-normal text-slate-400">{m.dose}</span></p>
+                  <p className="font-semibold text-slate-800 truncate">{m.name} <span className="text-sky-700 font-semibold">· {m.dose}</span></p>
                   <p className="text-xs text-slate-500">{m.frequency} · última {ddmm(m.lastTaken)}{m.daysAgo != null ? ` (hace ${m.daysAgo} d)` : ""}</p>
                   <p className={`text-xs ${m.overdue ? "text-red-600 font-medium" : "text-slate-500"}`}>próxima: {ddmm(m.nextDue)}{m.overdue ? " · atrasado" : ""}</p>
                 </div>
