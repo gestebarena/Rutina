@@ -79,7 +79,7 @@ function toMin(t: string) {
   return h * 60 + m;
 }
 
-type MarkTarget = { title: string; day: string; slots: { itemId: string; slot: string; occId: string }[]; isTreatment: boolean; isMaint: boolean; planTime: string | null };
+type MarkTarget = { title: string; day: string; slots: { itemId: string; slot: string; occId: string }[]; isTreatment: boolean; isMaint: boolean; planTime: string | null; dose?: string };
 // Alérgenos (treatment + maintenance) arrancan en la hora ACTUAL; las medicinas, en su hora del plan.
 function startsNow(category: string): boolean { return category !== "MED"; }
 type Bucket = { time: string | null; planTime: string | null; altTime: string | null; slots: Slot[] };
@@ -168,7 +168,7 @@ export default function TodayList({
     setWhen(d.editWhen || defaultWhen(d.day, null));
     setShowPostpone(false);
     setAdjustPlan(true);
-    setDialog({ title: name, day: d.day, slots: [{ itemId, slot: itemId, occId: d.occId }], isTreatment: false, isMaint: maintIds.has(itemId), planTime: null });
+    setDialog({ title: name, day: d.day, slots: [{ itemId, slot: itemId, occId: d.occId }], isTreatment: false, isMaint: maintIds.has(itemId), planTime: null, dose: maintDetail.find((m) => m.itemId === itemId)?.dose });
   }
   function openDetail(s: Slot) {
     setConfirmDel(false);
@@ -181,7 +181,7 @@ export default function TodayList({
     setDetail(null);
     setWhen(s.editWhen || defaultWhen(s.day, s.planTime ?? null));
     setShowPostpone(false);
-    setDialog({ title: s.name, day: s.day, slots: [{ itemId: s.itemId, slot: s.slot, occId: s.occId }], isTreatment: s.category === "TREATMENT", isMaint: isMaintCat(s.category), planTime: s.planTime ?? null });
+    setDialog({ title: s.name, day: s.day, slots: [{ itemId: s.itemId, slot: s.slot, occId: s.occId }], isTreatment: s.category === "TREATMENT", isMaint: isMaintCat(s.category), planTime: s.planTime ?? null, dose: s.dose });
   }
   const nextRef = useRef<HTMLDivElement>(null);
   const todayRef = useRef<HTMLDivElement>(null);
@@ -216,20 +216,20 @@ export default function TodayList({
     }
     return msToLocal(Date.now(), viewerTz);
   }
-  function openDialog(title: string, day: string, slots: { itemId: string; slot: string; occId: string }[], isTreatment: boolean, planSlotTime: string | null, isMaint = false, preferNow = false) {
+  function openDialog(title: string, day: string, slots: { itemId: string; slot: string; occId: string }[], isTreatment: boolean, planSlotTime: string | null, isMaint = false, preferNow = false, dose?: string) {
     setWhen(defaultWhen(day, planSlotTime, preferNow));
     setShowPostpone(false);
     setAdjustPlan(true);
     setPostDate(addDays(planToday, 2));
-    setDialog({ title, day, slots, isTreatment, isMaint, planTime: planSlotTime });
+    setDialog({ title, day, slots, isTreatment, isMaint, planTime: planSlotTime, dose });
   }
   function openSingle(s: Slot) {
-    openDialog(s.name, s.day, [{ itemId: s.itemId, slot: s.slot, occId: s.occId }], s.category === "TREATMENT", s.planTime ?? null, isMaintCat(s.category), startsNow(s.category));
+    openDialog(s.name, s.day, [{ itemId: s.itemId, slot: s.slot, occId: s.occId }], s.category === "TREATMENT", s.planTime ?? null, isMaintCat(s.category), startsNow(s.category), s.dose);
   }
   // Desde la sección de maintenance foods: abre el MISMO modal (no marca de una).
   function openMaintDialog(m: MaintRow) {
     if (!m.occId) return;
-    openDialog(m.name, planToday, [{ itemId: m.itemId, slot: m.itemId, occId: m.occId }], false, null, true, true);
+    openDialog(m.name, planToday, [{ itemId: m.itemId, slot: m.itemId, occId: m.occId }], false, null, true, true, m.dose);
   }
   function openPack(b: Bucket, day: string) {
     const pend = b.slots.filter((s) => !s.taken && !s.skipped && !s.postponed);
@@ -424,6 +424,7 @@ export default function TodayList({
         <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4" onClick={() => setDialog(null)}>
           <div className="bg-white rounded-3xl p-6 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-bold text-slate-800">{dialog.title}</h3>
+            {dialog.dose && <p className="text-sky-700 text-sm font-semibold -mt-0.5">Dosis: {dialog.dose}</p>}
             <p className="text-slate-500 text-sm mb-4">{dialog.slots.length > 1 ? "Se marcarán todas a esta hora." : ""}</p>
             <label className="block">
               <span className="text-sm font-medium text-slate-700">¿Cuándo se tomó?</span>
