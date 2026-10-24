@@ -42,14 +42,14 @@ const TF_RULE = "≥4 h tras mantenimiento · separar 15 min · 1 h de reposo de
 // Plan de Nico — actualizado con el informe FAI (Tolerance Visit 1). Horas en hora de Madrid.
 const items: I[] = [
   // --- MEDICINAS (sin cambios) ---
-  { id: "med-advagraf", name: "Advagraf", dose: "7 mg", category: "MED", frequency: "cada 24 h", times: ["07:30"], rule: "2 h de ayuno antes y 1 h después", sortOrder: 1, stockUnit: "mg", perDose: 7, presentations: [5, 3, 1, 0.5] },
-  { id: "med-myfortic", name: "Myfortic", dose: "180 mg (1 pastilla)", category: "MED", frequency: "cada 12 h", times: ["07:30", "20:00"], sortOrder: 2, stockUnit: "mg", perDose: 180, presentations: [180] },
-  { id: "med-prednisona", name: "Prednisona (o Medrol)", dose: "5 mg (≡ Medrol 4 mg)", category: "MED", frequency: "cada 48 h", times: ["07:30"], rule: "Días alternos · Medrol 4 mg se sustituye por Prednisona 5 mg (equivalencia del médico; en España a veces no hay Medrol)", intervalDays: 2, anchorDay: "2026-08-01", sortOrder: 3, stockUnit: "mg", perDose: 5, presentations: [5] },
-  { id: "med-amlodipino", name: "Amlodipino", dose: "5 mg", category: "MED", frequency: "cada 24 h", times: ["07:30"], sortOrder: 4, stockUnit: "mg", perDose: 5, presentations: [5] },
-  { id: "med-cetirizina", name: "Cetirizina (Zyrtec)", dose: "10 mg", category: "MED", frequency: "cada 24 h", times: ["07:30"], sortOrder: 5, stockUnit: "mg", perDose: 10, presentations: [10] },
-  { id: "med-fero", name: "Fero-Gradumet", dose: "1 pastilla", category: "MED", frequency: "cada 24 h", times: ["15:45"], rule: "Lejos de lácteos y del magnesio (2 h después del MagneCit del mediodía)", sortOrder: 6, stockUnit: "pill", perDose: 1 },
-  { id: "med-magnecit", name: "MagneCit", dose: "2 pastillas", category: "MED", frequency: "3 x día", times: ["07:30", "13:45", "20:00"], rule: "Lejos de lácteos y del Fero (horas orientativas; la del mediodía va entre la mañana y la noche)", sortOrder: 7, stockUnit: "pill", perDose: 2 },
-  { id: "med-saizen", name: "Hormona crecimiento (Saizen)", dose: "1.6 mg", category: "MED", frequency: "cada 24 h", times: ["21:30"], rule: "Antes de dormir (flexible)", sortOrder: 8, stockUnit: "dose", perDose: 1 },
+  { id: "med-advagraf", name: "Advagraf", dose: "7 mg", category: "MED", frequency: "cada 24 h", times: ["07:00"], rule: "2 h de ayuno antes y 1 h después", sortOrder: 1, stockUnit: "mg", perDose: 7, presentations: [5, 3, 1, 0.5] },
+  { id: "med-myfortic", name: "Myfortic", dose: "180 mg (1 pastilla)", category: "MED", frequency: "cada 12 h", times: ["07:00", "19:00"], sortOrder: 2, stockUnit: "mg", perDose: 180, presentations: [180] },
+  { id: "med-prednisona", name: "Prednisona (o Medrol)", dose: "5 mg (≡ Medrol 4 mg)", category: "MED", frequency: "cada 48 h", times: ["07:00"], rule: "Días alternos · Medrol 4 mg se sustituye por Prednisona 5 mg (equivalencia del médico; en España a veces no hay Medrol)", intervalDays: 2, anchorDay: "2026-08-01", sortOrder: 3, stockUnit: "mg", perDose: 5, presentations: [5] },
+  { id: "med-amlodipino", name: "Amlodipino", dose: "5 mg", category: "MED", frequency: "cada 24 h", times: ["07:00"], sortOrder: 4, stockUnit: "mg", perDose: 5, presentations: [5] },
+  { id: "med-cetirizina", name: "Cetirizina (Zyrtec)", dose: "10 mg", category: "MED", frequency: "cada 24 h", times: ["07:00"], sortOrder: 5, stockUnit: "mg", perDose: 10, presentations: [10] },
+  { id: "med-fero", name: "Fero-Gradumet", dose: "1 pastilla", category: "MED", frequency: "cada 24 h", times: ["19:00"], rule: "Junto con el Myfortic de la noche · lejos de lácteos y del magnesio", sortOrder: 6, stockUnit: "pill", perDose: 1 },
+  { id: "med-magnecit", name: "MagneCit", dose: "2 pastillas", category: "MED", frequency: "3 x día", times: ["07:00", "13:45", "22:00"], rule: "Lejos de lácteos y del Fero (la del mediodía va entre la mañana y la noche)", sortOrder: 7, stockUnit: "pill", perDose: 2 },
+  { id: "med-saizen", name: "Hormona crecimiento (Saizen)", dose: "1.6 mg", category: "MED", frequency: "cada 24 h", times: ["22:00"], rule: "Antes de dormir (flexible)", sortOrder: 8, stockUnit: "dose", perDose: 1 },
 
   // --- MAINTENANCE 3x/semana (Lun/Mié/Vie) ---
   { id: "main-pecana", name: "Pecana", dose: "6 mitades", category: "THREE_WEEK", frequency: "3 x semana", times: [], sortOrder: 1 },

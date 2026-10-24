@@ -108,18 +108,11 @@ export function resolveDose(item: ItemLike, day: string): string {
 // --- Horarios que cambian entre semana (L-V) y fin de semana (S-D) ---
 // Clave: itemId → (label de slot → { weekday, weekend }). Si el item+slot no está aquí,
 // se usa la hora fija del slot tal cual. weekdayOfDay: 0=dom .. 6=sáb → finde = 6 o 0.
-// NOTA: el Myfortic de la noche se movió de 20:00 a 19:30 (así entre semana queda con el
-// Fero y los findes con el MagneCit). Cambiar estos valores recalcula las tomas futuras.
+// Cambiar estos valores recalcula las tomas futuras.
+// Solo el MagneCit del mediodía varía entre semana/finde; el resto son horas fijas (en el slot).
 const WEEKDAY_TIME_OVERRIDES: Record<string, Record<string, { weekday: string; weekend: string }>> = {
   "med-magnecit": {
     "mediodía": { weekday: "16:45", weekend: "13:45" },
-    "noche": { weekday: "21:30", weekend: "19:30" },
-  },
-  "med-fero": {
-    "único": { weekday: "19:30", weekend: "15:45" },
-  },
-  "med-myfortic": {
-    "noche": { weekday: "19:30", weekend: "19:30" },
   },
 };
 
