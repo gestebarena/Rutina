@@ -89,7 +89,7 @@ const items: I[] = [
 
   // --- Ex-treatment que pasaron a MAINTENANCE en TV1 ---
   { id: "tf-calabaza", name: "Semilla de calabaza (molida)", dose: "1/2 cdta", category: "MAINTENANCE", frequency: "diario (mañana)", times: [], intervalDays: 1, sortOrder: 20 },
-  { id: "tf-clara", name: "Clara de huevo cruda", dose: "14 ml", category: "THREE_WEEK", frequency: "3x/sem (2 sem) → luego semanal", times: [], sortOrder: 21 },
+  { id: "tf-clara", name: "Clara de huevo cruda", dose: "14 ml", category: "THREE_WEEK", frequency: "3x/sem (2 sem) → luego semanal", times: [], doseDays: ["2026-10-30", "2026-11-02", "2026-11-04", "2026-11-06", "2026-11-09", "2026-11-11"], sortOrder: 21 },
 ];
 
 async function main() {
