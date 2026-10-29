@@ -83,10 +83,13 @@ const items: I[] = [
   { id: "wk-pinon", name: "Piñones", dose: "30 unidades", category: "BIWEEKLY", frequency: "cada 2 semanas", times: [], sortOrder: 3 },
   { id: "wk-almeja", name: "Almeja cocida", dose: "1 oz (30 g)", category: "BIWEEKLY", frequency: "cada 2 semanas", times: [], sortOrder: 4 },
 
-  // --- TREATMENT FOODS (tarde) — escalera automática por fecha ---
-  { id: "tf-calabaza", name: "Semilla de calabaza (molida)", dose: "200 mg", category: "TREATMENT", frequency: "diario (tarde)", times: ["17:00"], rule: TF_RULE, doseLevels: ["1 mg", "2.5 mg", "5 mg", "10 mg", "20 mg", "30 mg", "40 mg", "60 mg", "100 mg", "200 mg", "1/8 cdta"], cycleStartDay: "2026-06-01", sortOrder: 1 },
-  { id: "tf-clara", name: "Clara de huevo cruda", dose: "3.5 ml", category: "TREATMENT", frequency: "diario (tarde)", times: ["17:15"], rule: TF_RULE, doseLevels: ["3.5 ml", "4 ml", "4.5 ml", "5 ml", "5.5 ml", "6 ml", "7 ml"], cycleStartDay: "2026-08-03", sortOrder: 2 },
-  { id: "tf-cacahuete", name: "Cacahuete", dose: "18 cacahuetes", category: "TREATMENT", frequency: "6 días/semana (tarde)", times: ["17:30"], rule: "6 días/semana (1 día libre) · 1 h de reposo · día de exploración 1x/sem · mantequilla JIF: 1 cdta≈3, 2 cdas≈18 (enjuagar boca y beber agua)", sortOrder: 3 },
+  // --- TREATMENT FOODS (tarde) — escalera automática por fecha (Tolerance Visit 1) ---
+  { id: "tf-pulpo", name: "Pulpo cocido", dose: "100 mg", category: "TREATMENT", frequency: "diario (tarde) · sube semanal", times: ["17:00"], rule: "≥4 h tras maintenance · separar 15 min de otros treatment · 1 h de reposo después", doseLevels: ["100 mg", "200 mg", "325 mg", "575 mg", "875 mg", "1225 mg"], cycleStartDay: "2026-10-28", sortOrder: 1 },
+  { id: "tf-cacahuete", name: "Cacahuete", dose: "24 cacahuetes", category: "TREATMENT", frequency: "6 días/semana (tarde)", times: ["17:30"], rule: "6 días/semana (1 día libre) · separar 15 min de otros treatment · 1 h de reposo · mantequilla JIF: 1 cda + 1 cdta ≈ 24 (enjuagar boca y beber agua)", sortOrder: 2 },
+
+  // --- Ex-treatment que pasaron a MAINTENANCE en TV1 ---
+  { id: "tf-calabaza", name: "Semilla de calabaza (molida)", dose: "1/2 cdta", category: "MAINTENANCE", frequency: "diario (mañana)", times: [], intervalDays: 1, sortOrder: 20 },
+  { id: "tf-clara", name: "Clara de huevo cruda", dose: "14 ml", category: "THREE_WEEK", frequency: "3x/sem (2 sem) → luego semanal", times: [], sortOrder: 21 },
 ];
 
 async function main() {
