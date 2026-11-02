@@ -85,7 +85,15 @@ export async function ensureMaintenanceRolling(prisma: any, today: string) {
     const open = await prisma.doseOccurrence.count({ where: { itemId: it.id, status: { in: ["PENDING", "POSTPONED"] } } });
     if (open > 0) continue; // ya hay una próxima abierta
     const last = await lastResolvedDate(prisma, it.id);
-    const nextDue = last ? nextMaintDue(it, last) : today; // nunca dada aún → toca ya
+    let nextDue = last ? nextMaintDue(it, last) : today;
+    if (nextDue < today) nextDue = today; // si está vencido, toca hoy (no inventamos atrasos viejos)
+    // Saltar fechas que YA tienen una toma registrada (resuelta): si no, el upsert no crea nada
+    // y el alimento queda "congelado" sin próxima toma abierta.
+    let guard = 0;
+    while (guard++ < 90 && (await prisma.doseOccurrence.findFirst({ where: { itemId: it.id, periodKey: nextDue }, select: { id: true } }))) {
+      nextDue = nextMaintDue(it, nextDue);
+      if (nextDue < today) nextDue = today;
+    }
     await createMaintenanceNext(prisma, it, nextDue);
   }
 }
