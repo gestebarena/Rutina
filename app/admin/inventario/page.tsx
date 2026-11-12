@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { madridDay } from "@/lib/madrid";
 import { unitsPerDay, daysOfSupply, estimatedRunOut, effectiveThreshold, presentationsMg, unitLabel } from "@/lib/stock";
-import { setStockLevel, setItemStockAlertDays, setGlobalStockAlertDays } from "../../actions";
+import { setStockLevel, setItemStockAlertDays, setGlobalStockAlertDays, setStockConfig } from "../../actions";
 
 const inputCls = "mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-base focus:border-sky-500 focus:outline-none";
 
@@ -143,6 +143,35 @@ export default async function InventarioPage() {
                 </label>
                 <button className="rounded-xl bg-slate-200 px-3 py-2 text-sm font-semibold text-slate-700">Guardar</button>
               </form>
+
+              {/* Cómo se controla el stock: unidad base, descuento por toma y presentaciones (mg). */}
+              <details className="mt-3 rounded-xl bg-slate-50 p-3" open={it.stockUnit === "mg" && strengths.length === 0}>
+                <summary className="text-xs font-medium text-slate-700 cursor-pointer">⚙️ Presentaciones y consumo</summary>
+                <form action={setStockConfig} className="mt-3 space-y-3">
+                  <input type="hidden" name="itemId" value={it.id} />
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="block">
+                      <span className="text-xs font-medium text-slate-700">Unidad base</span>
+                      <select name="stockUnit" defaultValue={it.stockUnit ?? "pill"} className={inputCls}>
+                        <option value="mg">mg (presentaciones)</option>
+                        <option value="pill">pastillas</option>
+                        <option value="dose">tomas</option>
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-medium text-slate-700">Descuento por toma</span>
+                      <input name="perDose" type="number" min="0" step="any" defaultValue={it.perDose ?? ""} className={inputCls} placeholder="Ej. 7" />
+                    </label>
+                  </div>
+                  <label className="block">
+                    <span className="text-xs font-medium text-slate-700">Presentaciones en mg (solo si la unidad es mg)</span>
+                    <input name="presentations" defaultValue={strengths.map(fmtMg).join(", ")} className={inputCls} placeholder="Ej. 5, 3, 1, 0.5" />
+                    <span className="text-xs text-slate-400">Separadas por coma. Habilita un campo por presentación al cargar el inventario.</span>
+                  </label>
+                  <p className="text-xs text-slate-400">Si cambiás la unidad base, se borra el recuento cargado (hay que recontarlo con el esquema nuevo).</p>
+                  <button className="w-full rounded-xl bg-slate-200 px-3 py-2 text-sm font-semibold text-slate-700">Guardar configuración</button>
+                </form>
+              </details>
             </div>
           ))}
         </section>

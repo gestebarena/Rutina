@@ -217,6 +217,48 @@ export async function setItemStockAlertDays(formData: FormData): Promise<void> {
   revalidateInventario();
 }
 
+// Configura cómo se controla el stock de una medicina: unidad base (mg/pastillas/tomas),
+// cuánto se descuenta por toma (perDose) y, para las de mg, las presentaciones en mg
+// (p.ej. Advagraf 5/3/1/0,5). Esto habilita los campos por presentación al cargar inventario.
+export async function setStockConfig(formData: FormData): Promise<void> {
+  const session = await requireAdmin();
+  const itemId = String(formData.get("itemId") || "").trim();
+  if (!itemId) return;
+  const it = await prisma.item.findUnique({ where: { id: itemId } });
+  if (!it) return;
+
+  const unitRaw = String(formData.get("stockUnit") || "").trim();
+  const stockUnit = unitRaw === "mg" || unitRaw === "pill" || unitRaw === "dose" ? unitRaw : null;
+
+  const perRaw = String(formData.get("perDose") || "").trim().replace(",", ".");
+  const perParsed = parseFloat(perRaw);
+  const perDose = perRaw !== "" && Number.isFinite(perParsed) && perParsed > 0 ? perParsed : null;
+
+  // Presentaciones solo tienen sentido en mg; "5, 3, 1, 0.5" → JSON [5,3,1,0.5].
+  const presArr =
+    stockUnit === "mg"
+      ? String(formData.get("presentations") || "")
+          .split(/[,\n]/)
+          .map((s) => parseFloat(s.trim().replace(",", ".")))
+          .filter((n) => Number.isFinite(n) && n > 0)
+      : [];
+  const presentations = JSON.stringify(presArr);
+
+  // Si cambia la UNIDAD base, el stock guardado (en la unidad vieja) deja de ser válido:
+  // lo reseteamos para que el admin recargue el recuento con el esquema nuevo.
+  const unitChanged = (it.stockUnit ?? null) !== stockUnit;
+  const data: { stockUnit: string | null; perDose: number | null; presentations: string; stock?: number | null } = {
+    stockUnit,
+    perDose,
+    presentations,
+  };
+  if (unitChanged) data.stock = null;
+
+  await prisma.item.update({ where: { id: itemId }, data });
+  await audit(session.userId, "SET_STOCK_CONFIG", "item", itemId, { stockUnit, perDose, presentations: presArr, unitChanged });
+  revalidateInventario();
+}
+
 // Fija el default global de aviso en días (Config, fila id=1).
 export async function setGlobalStockAlertDays(formData: FormData): Promise<void> {
   const session = await requireAdmin();
