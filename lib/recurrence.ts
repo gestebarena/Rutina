@@ -125,6 +125,13 @@ export function plannedTimeFor(itemId: string, slotLabel: string, slotTime: stri
   return wd === 0 || wd === 6 ? ov.weekend : ov.weekday;
 }
 
+// Hora sugerida por defecto de los maintenance de la mañana (no tienen hora fija):
+// 08:00 de lunes a viernes, 09:00 sábados y domingos (se levantan más tarde el finde).
+export function maintMorningDefault(day: string): string {
+  const wd = weekdayOfDay(day); // 0=domingo, 6=sábado
+  return wd === 0 || wd === 6 ? "09:00" : "08:00";
+}
+
 // Clave de período: diario = la fecha; semanal = lunes de la semana; quincenal = índice de quincena.
 export function periodKeyFor(item: { recurrence: string }, day: string): string {
   if (item.recurrence === "WEEKLY") return "W:" + mondayOf(day);

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { markIntake, markMany, skipIntake, unmarkIntake, postponeIntake, markMissing, deleteMark } from "./actions";
 import { shortDayLabel, addDays } from "@/lib/madrid";
+import { maintMorningDefault } from "@/lib/recurrence";
 
 export type MaintRow = { itemId: string; occId: string | null; name: string; dose: string; frequency: string; interval: number; lastTaken: string | null; daysAgo: number | null; nextDue: string; overdue: boolean };
 export type EditDose = { occId: string; day: string; time: string | null; status: string; who: string; editWhen: string | null };
@@ -292,8 +293,8 @@ export default function TodayList({
   }
 
   const unresolved = (s: Slot) => !s.taken && !s.skipped && !s.postponed;
-  const MAINT_MOMENT = 9 * 60; // hora sugerida de los maintenance (09:00 ancla, "después del desayuno")
-  // ¿Ya pasó el momento sugerido de esta toma de HOY? (medicinas: su hora; maintenance: 09:00 o atrasado)
+  const MAINT_MOMENT = toMin(maintMorningDefault(planToday)); // hora sugerida de los maintenance (08:00 L-V, 09:00 finde)
+  // ¿Ya pasó el momento sugerido de esta toma de HOY? (medicinas: su hora; maintenance: su default o atrasado)
   const momentPassed = (s: Slot) => {
     if (isMaintCat(s.category)) return !!s.overdue || now >= MAINT_MOMENT;
     return !!s.planTime && now >= toMin(s.planTime);

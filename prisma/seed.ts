@@ -85,7 +85,7 @@ const items: I[] = [
 
   // --- TREATMENT FOODS (tarde) — escalera automática por fecha (Tolerance Visit 1) ---
   { id: "tf-pulpo", name: "Pulpo cocido", dose: "100 mg", category: "TREATMENT", frequency: "diario (tarde) · sube semanal", times: ["17:00"], rule: "≥4 h tras maintenance · separar 15 min de otros treatment · 1 h de reposo después", doseLevels: ["100 mg", "200 mg", "325 mg", "575 mg", "875 mg", "1225 mg"], cycleStartDay: "2026-10-28", sortOrder: 1 },
-  { id: "tf-cacahuete", name: "Cacahuete", dose: "24 cacahuetes", category: "TREATMENT", frequency: "6 días/semana (tarde)", times: ["17:30"], rule: "6 días/semana (1 día libre) · separar 15 min de otros treatment · 1 h de reposo · mantequilla JIF: 1 cda + 1 cdta ≈ 24 (enjuagar boca y beber agua)", sortOrder: 2 },
+  { id: "tf-cacahuete", name: "Cacahuete", dose: "24 cacahuetes", category: "TREATMENT", frequency: "6 días/semana (tarde)", times: ["16:45"], rule: "6 días/semana (1 día libre) · separar 15 min de otros treatment · 1 h de reposo · mantequilla JIF: 1 cda + 1 cdta ≈ 24 (enjuagar boca y beber agua)", sortOrder: 2 },
 
   // --- Ex-treatment que pasaron a MAINTENANCE en TV1 ---
   { id: "tf-calabaza", name: "Semilla de calabaza (molida)", dose: "1/2 cdta", category: "MAINTENANCE", frequency: "diario (mañana)", times: [], intervalDays: 1, sortOrder: 20 },

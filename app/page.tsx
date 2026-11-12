@@ -6,7 +6,7 @@ import HeaderClock from "./HeaderClock";
 import { doseLevelForDay } from "@/lib/schedule";
 import { MEDALS } from "@/lib/stats";
 import { ensureGenerated } from "@/lib/generate";
-import { isMaintenance, maintInterval, nextMaintDue } from "@/lib/recurrence";
+import { isMaintenance, maintInterval, nextMaintDue, maintMorningDefault } from "@/lib/recurrence";
 import { unitsPerDay, daysOfSupply, effectiveThreshold, unitLabel } from "@/lib/stock";
 import { convertWallTime, tzCode, tzLabel, wallTimeToMs } from "@/lib/tz";
 import { parseTaken } from "@/lib/taken";
@@ -147,9 +147,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ d
   function occToSlot(o: Occ, opts: { must: boolean; foodNote?: string | null; forToday: boolean; maintAgenda?: boolean }): Slot {
     const it = itemById.get(o.itemId)!;
     const isMaint = isMaintenance(it);
-    // Maintenance en la agenda de hoy: se muestra a la mañana (09:00) pero se marca "ahora" (día = hoy).
+    // Maintenance en la agenda de hoy: se muestra a la mañana (08:00 L-V / 09:00 finde) pero se marca "ahora" (día = hoy).
     const agendaDay = opts.maintAgenda ? today : o.dueDate;
-    const planned = o.plannedTime ?? (isMaint ? "09:00" : null);
+    const planned = o.plannedTime ?? (isMaint ? maintMorningDefault(agendaDay) : null);
     const time = planned ? convertWallTime(planned, agendaDay, anchorTz, viewerTz) : null;
     const altTime = planned && viewerTz !== anchorTz ? planned : null;
     const taken = o.status === "TAKEN", skipped = o.status === "SKIPPED", postponed = o.status === "POSTPONED";
